@@ -10,20 +10,24 @@
 #include <time.h>
 #include <locale.h>
 #include "rf4_sniffer.h"
+#include "rf4_packet_list.h"
 
 int rf4_token_captured = 0;
 char* wavList[3]  = {0};
 u_int local_port = 0;
 u_int64 packet_count = 0;
-u_int last_seq = 0;
-u_int last_data_length = 0;
-u_char dec_buffer[65535];
+u_char dec_buffer[33554432];
 int dec_buffer_offset = 0;
 int to_be_decrypt_count = 0;
 int to_be_print_count = 0;
+u_int expect_seq = 0;
+List* future_packets;
 
 FILE *file_ptr = NULL;
 char filename[64];
+
+FILE *log_ptr = NULL;
+char logname[64] = "./log/fullLog";
 
 struct _rc4 {
     u_char s_box[256];
@@ -86,6 +90,42 @@ u_char _PRGA() {
     return rc4.s_box[tmp_idx];
 }
 
+void parse_single_packet(u_char* buffer, u_int size) {
+    if (packet_count == 0) {packet_count = 1; return;}
+    int offset = 0;
+    if (size > 13) fprintf(log_ptr, "seq:%u len:%u\n", expect_seq - size, size);
+    while(offset < size) {
+        if (to_be_decrypt_count > 0) {
+            u_char decrypted_byte = buffer[offset] ^ _PRGA();
+
+            dec_buffer[dec_buffer_offset] = decrypted_byte;
+            dec_buffer_offset++;
+
+            to_be_decrypt_count--;
+            offset++;
+            
+            if (to_be_decrypt_count == 0) {
+                fprintf(log_ptr, "    >> decrypt data:%x size:%d\n", *(u_int*)dec_buffer, dec_buffer_offset);
+                
+                if (*(u_int64*)(dec_buffer + 8) == 0x30383403030E0E00) {
+                    snprintf(filename, sizeof(filename), "./log/%u", expect_seq  - size);
+                    file_ptr = fopen(filename, "wb+");
+                    fwrite(dec_buffer, sizeof(u_char), dec_buffer_offset, file_ptr);
+                    fclose(file_ptr);
+                    file_ptr = NULL;
+                }
+            }
+        } else {
+            to_be_decrypt_count = *(u_int*)(buffer + offset) - 9;
+            offset += 13;
+            if (to_be_decrypt_count > 0) {
+                dec_buffer_offset = 0;
+            }
+        }
+    }
+}
+
+
 // Packet processing callback function
 void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u_char *packet) {
     // Extract Ethernet header
@@ -114,58 +154,30 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
             rf4_token_captured = 1; // 找到了
             KSA(raw_data + 6, *(u_int*)(raw_data + 2));// S盒初始置换
             local_port = tcp_hdr->sport;
+            expect_seq = ntohl(tcp_hdr->ack_seq);
             printf("俄钓启动..\n");
         }
     } else { //已找到俄钓起始数据包
         // 匹配接受的俄钓数据包
         if (tcp_hdr->dport != local_port) return; // 端口不对
-        u_int seq = ntohl(tcp_hdr->seq);
-        if (seq <= last_seq && last_seq - seq < 0x7FFFFF && last_data_length == data_length) return;  // 重传包不要
-        last_seq = seq;
-        last_data_length = data_length;
         if (data_length == 0) {return;}
-        if (packet_count == 0) {packet_count = 1; return;}
-        if (data_length <= 13) {return;}
 
+        u_int seq = ntohl(tcp_hdr->seq);
+        if (seq < expect_seq) return;  // 重传包不要
+        if (seq > expect_seq) { // 未来包
+            fprintf(log_ptr, "!!!!收到未来包 seq:%u expect:%u\n", seq, expect_seq);
+            list_insert(future_packets, seq, data_length, raw_data);
+            return;
+        }
+        expect_seq = seq + data_length;
+        parse_single_packet(raw_data, data_length);
 
-        int raw_data_offset = 0;
-        printf("seq:%u len:%u\n", seq, data_length);
-        while(raw_data_offset < data_length) {
-            if (to_be_decrypt_count > 0) {
-                u_char decrypted_byte = raw_data[raw_data_offset] ^ _PRGA();
+        Node* node = NULL;
+        while (node = list_search(future_packets, expect_seq)) { // 检查未来包列表
+            expect_seq = node->seq + node->size;
+            parse_single_packet(node->buffer, node->size);
 
-                dec_buffer[dec_buffer_offset] = decrypted_byte;
-                dec_buffer_offset++;
-
-                if (file_ptr != NULL) {
-                    fwrite(&decrypted_byte, sizeof(u_char), 1, file_ptr);
-                }
-
-                to_be_decrypt_count--;
-                raw_data_offset++;
-                
-                if (to_be_decrypt_count == 0) {
-                    printf("    >> decrypt data:%x\n", *(u_int*)dec_buffer);
-                    // 如果文件指针打开，关闭它
-                    if (file_ptr != NULL) {
-                        fclose(file_ptr);
-                        file_ptr = NULL;
-                    }
-                }
-            } else {
-                to_be_decrypt_count = *(u_int*)(raw_data + raw_data_offset) - 9;
-                raw_data_offset += 13;
-                if (to_be_decrypt_count > 0) {
-                    dec_buffer_offset = 0;
-
-                    if (to_be_decrypt_count > 600) {
-                        snprintf(filename, sizeof(filename), "./log/%u", seq);
-                        file_ptr = fopen(filename, "wb+");
-                    } else {
-                        file_ptr = NULL;
-                    }
-                }
-            }
+            list_delete(future_packets, node);
         }
     }
 
@@ -262,6 +274,10 @@ int main(int argc, char **argv) {
         }
     }
     
+
+    future_packets = list_create();
+    log_ptr = fopen(logname, "w");
+
     // Open the device
     handle = pcap_open_live(d->name, 65536, 1, 1000, errbuf);
     if (handle == NULL) {
