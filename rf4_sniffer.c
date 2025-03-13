@@ -22,12 +22,17 @@ int to_be_decrypt_count = 0;
 int to_be_print_count = 0;
 u_int expect_seq = 0;
 List* future_packets;
+int interface_num;
+pcap_if_t *alldevs, *d;
 
 FILE *file_ptr = NULL;
 char filename[64];
 
 FILE *log_ptr = NULL;
 char logname[64] = "./log/fullLog";
+
+char* status_normal = "\033[32m正常\033[0m";
+char* status_obnormal = "\033[31m异常\033[0m";
 
 struct _rc4 {
     u_char s_box[256];
@@ -106,7 +111,7 @@ void parse_single_packet(u_char* buffer, u_int size) {
             
             if (to_be_decrypt_count == 0) {
                 fprintf(log_ptr, "    >> decrypt data:%x size:%d\n", *(u_int*)dec_buffer, dec_buffer_offset);
-                
+                // printf("\r序号:%u   解密状态:%s", expect_seq  - size, (*(u_short*)(dec_buffer + 2)) == (u_short)0xFF ? status_normal : status_obnormal);
                 if (*(u_int64*)(dec_buffer + 8) == 0x30383403030E0E00) {
                     snprintf(filename, sizeof(filename), "./log/%u", expect_seq  - size);
                     file_ptr = fopen(filename, "wb+");
@@ -155,7 +160,7 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
             KSA(raw_data + 6, *(u_int*)(raw_data + 2));// S盒初始置换
             local_port = tcp_hdr->sport;
             expect_seq = ntohl(tcp_hdr->ack_seq);
-            printf("俄钓启动..\n");
+            printf("\r网口:%d   本地端口:%d   \033[32m 游戏已启动 \033[0m                                           \n", interface_num, ntohs(local_port));
         }
     } else { //已找到俄钓起始数据包
         // 匹配接受的俄钓数据包
@@ -194,7 +199,6 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
 }
 
 int main(int argc, char **argv) {
-    pcap_if_t *alldevs, *d;
     pcap_t *handle;
     char errbuf[PCAP_ERRBUF_SIZE];
     srand(time(NULL));  // 设置随机种子
@@ -242,7 +246,6 @@ int main(int argc, char **argv) {
     scanf("%s", &interface_name);
     system("cls");
 	i = 0;
-    int interface_num;
     // Check if the user provided an interface number or name
     if (interface_name[0] >= '0' && interface_name[0] <= '9') {
         interface_num = atoi(interface_name);
@@ -277,6 +280,8 @@ int main(int argc, char **argv) {
 
     future_packets = list_create();
     log_ptr = fopen(logname, "w");
+
+    printf("网口:%d.%s   \033[31m 等待游戏开启(小退重开)... \033[0m", interface_num, d->description);
 
     // Open the device
     handle = pcap_open_live(d->name, 65536, 1, 1000, errbuf);
