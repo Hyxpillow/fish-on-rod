@@ -10,23 +10,26 @@
 #include <time.h>
 #include <locale.h>
 #include "rf4_sniffer.h"
-#include "rf4_ports.h"
 
+int rf4_token_captured = 0;
+char* wavList[3]  = {0};
+u_int local_port = 0;
+u_int64 packet_count = 0;
+u_int last_seq = 0;
+u_int last_data_length = 0;
+u_char dec_buffer[65535];
+int dec_buffer_offset = 0;
+int to_be_decrypt_count = 0;
+int to_be_print_count = 0;
 
-Packet_filter fish_list[MAX_PACKET_FILTER_COUNT];
-int fish_list_len;
-Packet_filter invalid_packet_list[MAX_PACKET_FILTER_COUNT];
-int invalid_list_len;
+FILE *file_ptr = NULL;
+char filename[64];
 
-int font_color_list[4] = {15, 14, 11, 10};
-
-char* wavList[3];
-int* localPorts;
-int localPortCount;
-char localPortString[100];
-int packet_received;
-int interface_num;
-
+struct _rc4 {
+    u_char s_box[256];
+    int i;
+    int j;
+} rc4;
 
 char* load_wav_file(const char* filename) {
     size_t size = 0;
@@ -54,23 +57,37 @@ char* load_wav_file(const char* filename) {
     return buffer;
 }
 
-void read_data(const char* filename, Packet_filter *filter_list, int *count) {
-    FILE *file = fopen(filename, "r");
-    if (!file) {
-        perror("无法打开数据文件\n");
-        system("pause");
-        exit(1);
+
+void KSA(u_char* key, u_int key_length) {
+    int r8 = 0;
+    int r9 = 0;
+    int tmp = 0;
+
+    while (r8 < 256) {
+        r9 = (r9 + rc4.s_box[r8] + key[r8 % key_length]) % 256;
+        tmp = rc4.s_box[r8];
+        rc4.s_box[r8] = rc4.s_box[r9];
+        rc4.s_box[r9] = tmp;
+        r8++;
     }
-    while (*count < MAX_PACKET_FILTER_COUNT && fscanf(file, "%89[^,],%d\n", 
-        filter_list[*count].description, &filter_list[*count].number) == 2) {
-        (*count)++;
-    }
-    fclose(file);
+}
+
+u_char _PRGA() {
+    int tmp_idx = 0;
+    u_char tmp = 0;
+
+    rc4.i = (rc4.i + 1) % 256;
+    rc4.j = (rc4.j + rc4.s_box[rc4.i]) % 256;
+    tmp = rc4.s_box[rc4.i];
+    rc4.s_box[rc4.i] = rc4.s_box[rc4.j];
+    rc4.s_box[rc4.j] = tmp;
+
+    tmp_idx = (rc4.s_box[rc4.i] + rc4.s_box[rc4.j]) % 256;
+    return rc4.s_box[tmp_idx];
 }
 
 // Packet processing callback function
 void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u_char *packet) {
-    
     // Extract Ethernet header
     ethernet_header *eth_header = (ethernet_header *)packet;
     ethernet_header_lo *eth_header_lo = (ethernet_header_lo *)packet;
@@ -84,67 +101,84 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
     
     ip_header *ip_hdr = (ip_header *)(packet + eth_header_len);
     int ip_header_len = (ip_hdr->ver_ihl & 0x0F) * 4;
-    
     if (ip_hdr->proto != PROTO_TCP) return;
-    // Extract TCP header
+
     tcp_header *tcp_hdr = (tcp_header *)(packet + eth_header_len + ip_header_len);
     int tcp_header_len = ((tcp_hdr->data_off & 0xF0) >> 4) * 4;
-
     int push_flag = (tcp_hdr->flags & 0x08) >> 3;
     int data_length = ntohs(ip_hdr->tlen) - ip_header_len - tcp_header_len;
-
-    int dport = ntohs(tcp_hdr->dport);
-    int port_in_list = 0;
-    for (int i = 0; i < localPortCount; i++) {
-        if (dport == localPorts[i]) {
-            port_in_list = 1;
-            break;
-        }
-    }
-    if (!port_in_list) return;
-    if (!push_flag) return;
-
-    if (!packet_received) {
-        printf("\r网口:%d  俄钓端口:[%s\b]    \033[32m网口/端口有效\033[0m                 \n", interface_num, localPortString);
-        packet_received = 1;
-    }
-
-    if (data_length < 525) return;
-    if (data_length > 1800) return;
-    for (int i = 0; i < invalid_list_len; i++) {
-        if (invalid_packet_list[i].number == data_length) {
-            return;
-        }
-    }
-    
     u_char *raw_data = (u_char *)(packet + eth_header_len + ip_header_len + tcp_header_len);
 
-    if  (raw_data[2] != 0 || raw_data[3] != 0) return;
-    /* filter end */
+    if (!rf4_token_captured) {  //未找到俄钓起始数据包
+        if (data_length > 6 && *(u_int*)(raw_data + 2) == data_length - 6) {
+            rf4_token_captured = 1; // 找到了
+            KSA(raw_data + 6, *(u_int*)(raw_data + 2));// S盒初始置换
+            local_port = tcp_hdr->sport;
+            printf("俄钓启动..\n");
+        }
+    } else { //已找到俄钓起始数据包
+        // 匹配接受的俄钓数据包
+        if (tcp_hdr->dport != local_port) return; // 端口不对
+        u_int seq = ntohl(tcp_hdr->seq);
+        if (seq <= last_seq && last_seq - seq < 0x7FFFFF && last_data_length == data_length) return;  // 重传包不要
+        last_seq = seq;
+        last_data_length = data_length;
+        if (data_length == 0) {return;}
+        if (packet_count == 0) {packet_count = 1; return;}
+        if (data_length <= 13) {return;}
 
-    static int log_line_count = 0;
 
-    time_t t;
-    struct tm *tm_info;
+        int raw_data_offset = 0;
+        printf("seq:%u len:%u\n", seq, data_length);
+        while(raw_data_offset < data_length) {
+            if (to_be_decrypt_count > 0) {
+                u_char decrypted_byte = raw_data[raw_data_offset] ^ _PRGA();
 
-    time(&t);
-    tm_info = localtime(&t);
-    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), font_color_list[log_line_count % 4]);
-    log_line_count++;
-    printf("No.%d  %02d:%02d:%02d  Packet:%4d  ", log_line_count, tm_info->tm_hour, tm_info->tm_min, tm_info->tm_sec,data_length);
-    int have_prediction = 0;
-    char prediction[100] = {0};
-    for (int i = 0; i < fish_list_len; i++) {
-        if (fish_list[i].number == data_length) {
-            have_prediction = 1;
-            sprintf(prediction + strlen(prediction), "%s ", fish_list[i].description);
+                dec_buffer[dec_buffer_offset] = decrypted_byte;
+                dec_buffer_offset++;
+
+                if (file_ptr != NULL) {
+                    fwrite(&decrypted_byte, sizeof(u_char), 1, file_ptr);
+                }
+
+                to_be_decrypt_count--;
+                raw_data_offset++;
+                
+                if (to_be_decrypt_count == 0) {
+                    printf("    >> decrypt data:%x\n", *(u_int*)dec_buffer);
+                    // 如果文件指针打开，关闭它
+                    if (file_ptr != NULL) {
+                        fclose(file_ptr);
+                        file_ptr = NULL;
+                    }
+                }
+            } else {
+                to_be_decrypt_count = *(u_int*)(raw_data + raw_data_offset) - 9;
+                raw_data_offset += 13;
+                if (to_be_decrypt_count > 0) {
+                    dec_buffer_offset = 0;
+
+                    if (to_be_decrypt_count > 600) {
+                        snprintf(filename, sizeof(filename), "./log/%u", seq);
+                        file_ptr = fopen(filename, "wb+");
+                    } else {
+                        file_ptr = NULL;
+                    }
+                }
+            }
         }
     }
-    if (have_prediction) {
-        printf("Predict:[%s\b]", prediction);
-        PlaySound(wavList[rand() % 3], NULL, SND_MEMORY | SND_ASYNC | SND_NOSTOP);
-    }
-    printf("\n");
+
+    // static int log_line_count = 0;
+
+    // time_t t;
+    // struct tm *tm_info;
+    // time(&t);
+    // tm_info = localtime(&t);
+    // SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), font_color_list[log_line_count % 4]);
+    // log_line_count++;
+    // printf("No.%d  %02d:%02d:%02d  Packet:%4d  ", log_line_count, tm_info->tm_hour, tm_info->tm_min, tm_info->tm_sec,data_length);
+    // printf("\n");
 }
 
 int main(int argc, char **argv) {
@@ -159,23 +193,8 @@ int main(int argc, char **argv) {
     setlocale(LC_ALL, "en_US.UTF-8");
     SetConsoleTitleW(L"妙妙小工具");
 
-    const char* processName = "rf4_x64.exe";
-    DWORD pid = GetProcessIdByName(processName);
-    if (pid) {
-        localPortCount = GetTcpConnectionsForPid(pid, &localPorts);
-        if (localPorts == NULL) {
-            printf("游戏已打开，但尚未建立网络连接\n");
-            system("pause");
-            exit(1);
-        }
-    } else {
-        printf("游戏未找到\n");
-        system("pause");
-        exit(1);
-    }
-
-    for (int i = 0; i < localPortCount; i++) {
-        sprintf(localPortString + strlen(localPortString), "%d ", localPorts[i]);
+    for (int i = 0; i < 256; i++) {
+        rc4.s_box[i] = i;
     }
 
     // Initialize winsock
@@ -189,11 +208,6 @@ int main(int argc, char **argv) {
     }
     int i = 0;
     // List all available interfaces if no specific interface is provided
-    printf("\033[32m** data/fishes.txt记录上鱼数据包 (白名单，出现时会响)\n");
-    printf("** data/invalid_packet.txt记录无效数据包 (黑名单，不会显示)\n");
-    printf("** 以上两个文件可以随时修改,保证格式不变就好,修改后重启v2.exe生效\n");
-    printf("** PS: 长度小于525的数据包默认丢弃\033[0m\n");
-
     printf("网口列表:\n");
     for (d = alldevs; d; d = d->next) {
         i++;
@@ -216,6 +230,7 @@ int main(int argc, char **argv) {
     scanf("%s", &interface_name);
     system("cls");
 	i = 0;
+    int interface_num;
     // Check if the user provided an interface number or name
     if (interface_name[0] >= '0' && interface_name[0] <= '9') {
         interface_num = atoi(interface_name);
@@ -247,7 +262,6 @@ int main(int argc, char **argv) {
         }
     }
     
-    
     // Open the device
     handle = pcap_open_live(d->name, 65536, 1, 1000, errbuf);
     if (handle == NULL) {
@@ -258,16 +272,10 @@ int main(int argc, char **argv) {
     // We don't need the device list anymore
     pcap_freealldevs(alldevs);
     
-    printf("网口:%d  俄钓端口:[%s\b]  \033[31m此网口/端口无数据包 (稍等2s...)\033[0m", interface_num, localPortString);
-    
-    read_data(FISHES_TXT, fish_list, &fish_list_len);
-    read_data(INVALID_PACKET_TXT, invalid_packet_list, &invalid_list_len);
-
     // Start capturing packets
     pcap_loop(handle, 0, packet_handler, NULL);
     
     // Cleanup
     pcap_close(handle);
-    
     return 0;
 }
