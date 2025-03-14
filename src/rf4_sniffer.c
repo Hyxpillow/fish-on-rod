@@ -10,35 +10,79 @@
 #include <time.h>
 #include <locale.h>
 #include "rf4_sniffer.h"
+#include "rf4_fish_name.h"
 #include "rf4_packet_list.h"
 
-int rf4_token_captured = 0;
-char* wavList[3]  = {0};
-u_int local_port = 0;
-u_int64 packet_count = 0;
-u_char dec_buffer[33554432];
-int dec_buffer_offset = 0;
-int to_be_decrypt_count = 0;
-int to_be_print_count = 0;
-u_int expect_seq = 0;
-List* future_packets;
+
+char* wavList[3] = {0};
 int interface_num;
 pcap_if_t *alldevs, *d;
+char logname[64] = "./log/fullLog";
+wchar_t* status_normal = L"解密正常";
+wchar_t* status_obnormal = L"解密失败";
+
+int rf4_token_captured = 0;
+u_int local_port;
+u_int packet_count;
+u_char dec_buffer[33554432];
+int dec_buffer_offset;
+int to_be_decrypt_count;
+int to_be_print_count;
+u_int expect_seq;
+List* future_packets;
+int fish_count;
+u_int64 rod1_hash1;
+u_int64 rod1_hash2;
+u_int64 rod2_hash1;
+u_int64 rod2_hash2;
+u_int64 rod3_hash1;
+u_int64 rod3_hash2;
 
 FILE *file_ptr = NULL;
-char filename[64];
-
 FILE *log_ptr = NULL;
-char logname[64] = "./log/fullLog";
 
-char* status_normal = "\033[32m正常\033[0m";
-char* status_obnormal = "\033[31m异常\033[0m";
+wchar_t* status_current;
+wchar_t title[256];
 
 struct _rc4 {
     u_char s_box[256];
     int i;
     int j;
 } rc4;
+
+void init_sniffer() {
+    rf4_token_captured = 0;
+    local_port = 0;
+    packet_count = 0;
+    dec_buffer_offset = 0;
+    to_be_decrypt_count = 0;
+    to_be_print_count = 0;
+    expect_seq = 0;
+    fish_count = 0;
+    rod1_hash1 = 0;
+    rod1_hash2 = 0;
+    rod2_hash1 = 0;
+    rod2_hash2 = 0;
+    rod3_hash1 = 0;
+    rod3_hash2 = 0;
+
+    status_current = status_normal;
+    for (int i = 0; i < 256; i++) {
+        rc4.s_box[i] = i;
+        rc4.i = 0;
+        rc4.j = 0;
+    }
+
+    list_destroy(future_packets);
+    future_packets = list_create();
+
+    if (log_ptr) fclose(log_ptr);
+    log_ptr = fopen(logname, "w");
+
+    system("cls");
+    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 15);
+    printf("网口:%d.%s   \033[31m 等待连接至服务器(小退重连)... \033[0m", interface_num, d->description);
+}
 
 char* load_wav_file(const char* filename) {
     size_t size = 0;
@@ -65,7 +109,6 @@ char* load_wav_file(const char* filename) {
     fclose(file);
     return buffer;
 }
-
 
 void KSA(u_char* key, u_int key_length) {
     int r8 = 0;
@@ -95,10 +138,101 @@ u_char _PRGA() {
     return rc4.s_box[tmp_idx];
 }
 
+void save_packet(int size) {
+    char filename[64];
+    snprintf(filename, sizeof(filename), "./log/%u_%d", expect_seq  - size, size);
+    file_ptr = fopen(filename, "wb+");
+    fwrite(dec_buffer, sizeof(u_char), dec_buffer_offset, file_ptr);
+    fclose(file_ptr);
+    file_ptr = NULL;
+}
+
+void parse_rod_packet() {
+    u_int shortcut = *(u_int*)(dec_buffer + 0x0C);
+    time_t t;
+    struct tm *tm_info;
+    time(&t);
+    tm_info = localtime(&t);
+    u_int op = 0;
+    if (shortcut == 0x010000) {
+        rod1_hash1 = *(u_int64*)(dec_buffer + 0x10);
+        rod1_hash2 = *(u_int64*)(dec_buffer + 0x18);
+        op = 1;
+    } else if (shortcut == 0x020000) {
+        rod2_hash1 = *(u_int64*)(dec_buffer + 0x10);
+        rod2_hash2 = *(u_int64*)(dec_buffer + 0x18);
+        op = 2;
+    } else if (shortcut == 0x030000) {
+        rod3_hash1 = *(u_int64*)(dec_buffer + 0x10);
+        rod3_hash2 = *(u_int64*)(dec_buffer + 0x18);
+        op = 3;
+    } else {
+        return;
+    }
+    if (rod1_hash1 != 0)
+        printf("%02d:%02d:%02d  设置%u号鱼竿\n",tm_info->tm_hour,tm_info->tm_min, tm_info->tm_sec, op);
+    else
+        printf("%02d:%02d:%02d  移除%u号鱼竿\n",tm_info->tm_hour,tm_info->tm_min, tm_info->tm_sec, op);
+}
+
+void parse_fish_packet() {
+    u_int64 rod_hash1 = *(u_int64*)(dec_buffer + 0x13);
+    u_int64 rod_hash2 = *(u_int64*)(dec_buffer + 0x1B);
+
+    int rod = 0;
+    if (rod_hash1 == rod1_hash1 && rod_hash2 == rod1_hash2) {
+        rod = 1;
+    } else if (rod_hash1 == rod2_hash1 && rod_hash2 == rod2_hash2) {
+        rod = 2;
+    } else if (rod_hash1 == rod3_hash1 && rod_hash2 == rod3_hash2) {
+        rod = 3;
+    }
+
+    u_char fish_name_len = dec_buffer[0x38];
+    char fishname[64];
+    memcpy(fishname, dec_buffer + 0x39, fish_name_len);
+    fishname[fish_name_len] = 0;
+
+    float fish_weight = *(float*)(dec_buffer + 62 + fish_name_len);
+
+    struct Fish_Data *fish_data = get_fish_data(fishname);
+
+    const char* to_be_print_fish_name = "未知";
+    int to_be_print_color = 15;
+    if (fish_data) {
+        to_be_print_fish_name = fish_data->name;
+        if (fish_data->rarity == 1) to_be_print_color = 5;
+        if (fish_data->rarity == 2) to_be_print_color = 13;
+        if ((double)fish_weight * 1000 >= (double)fish_data->trophy) to_be_print_color = 14;
+        if ((double)fish_weight * 1000 >= (double)fish_data->super_trophy) to_be_print_color = 9;
+    }
+    
+
+    time_t t;
+    struct tm *tm_info;
+    time(&t);
+    tm_info = localtime(&t);
+
+    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), to_be_print_color);
+    printf("%02d:%02d:%02d    [Rod %d]    %.3f kg    %s\n",
+        tm_info->tm_hour,
+        tm_info->tm_min,
+        tm_info->tm_sec,
+        rod, // 突出鱼竿号
+        fish_weight,
+        to_be_print_fish_name);
+    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 15);
+}
+
 void parse_single_packet(u_char* buffer, u_int size) {
-    if (packet_count == 0) {packet_count = 1; return;}
+    packet_count += 1;
+    if (packet_count == 1) return;
+    swprintf(title, 256, L"状态:%s 总计:%d", status_current, packet_count & 0xFFFF);
+    SetConsoleTitleW(title);
     int offset = 0;
-    if (size > 13) fprintf(log_ptr, "seq:%u len:%u\n", expect_seq - size, size);
+    if (size > 13) {
+        fprintf(log_ptr, "seq:%u len:%u\n", expect_seq - size, size);
+    }
     while(offset < size) {
         if (to_be_decrypt_count > 0) {
             u_char decrypted_byte = buffer[offset] ^ _PRGA();
@@ -111,25 +245,25 @@ void parse_single_packet(u_char* buffer, u_int size) {
             
             if (to_be_decrypt_count == 0) {
                 fprintf(log_ptr, "    >> decrypt data:%x size:%d\n", *(u_int*)dec_buffer, dec_buffer_offset);
-                // printf("\r序号:%u   解密状态:%s", expect_seq  - size, (*(u_short*)(dec_buffer + 2)) == (u_short)0xFF ? status_normal : status_obnormal);
-                if (*(u_int64*)(dec_buffer + 8) == 0x30383403030E0E00) {
-                    snprintf(filename, sizeof(filename), "./log/%u", expect_seq  - size);
-                    file_ptr = fopen(filename, "wb+");
-                    fwrite(dec_buffer, sizeof(u_char), dec_buffer_offset, file_ptr);
-                    fclose(file_ptr);
-                    file_ptr = NULL;
+                status_current =  (*(u_short*)(dec_buffer + 2)) == (u_short)0xFFFF? status_normal : status_obnormal;
+                if (*(u_int*)(dec_buffer + 8) == 0x030E0E00) { //上鱼    
+                    parse_fish_packet(); 
+                    PlaySound(wavList[rand() % 3], NULL, SND_MEMORY | SND_ASYNC | SND_NOSTOP);
+                } else if (*(u_int*)(dec_buffer + 8) == 0x00880100) { //杆子快捷键
+                    parse_rod_packet(); 
                 }
+                // save_packet(size);
             }
         } else {
             to_be_decrypt_count = *(u_int*)(buffer + offset) - 9;
             offset += 13;
             if (to_be_decrypt_count > 0) {
+                fprintf(log_ptr, "  >> malloc size:%d\n", to_be_decrypt_count);
                 dec_buffer_offset = 0;
             }
         }
     }
 }
-
 
 // Packet processing callback function
 void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u_char *packet) {
@@ -150,7 +284,8 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
 
     tcp_header *tcp_hdr = (tcp_header *)(packet + eth_header_len + ip_header_len);
     int tcp_header_len = ((tcp_hdr->data_off & 0xF0) >> 4) * 4;
-    int push_flag = (tcp_hdr->flags & 0x08) >> 3;
+    // int push_flag = (tcp_hdr->flags & 0x08) >> 3;
+    int fin_flag = tcp_hdr->flags & 0x01;
     int data_length = ntohs(ip_hdr->tlen) - ip_header_len - tcp_header_len;
     u_char *raw_data = (u_char *)(packet + eth_header_len + ip_header_len + tcp_header_len);
 
@@ -160,16 +295,20 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
             KSA(raw_data + 6, *(u_int*)(raw_data + 2));// S盒初始置换
             local_port = tcp_hdr->sport;
             expect_seq = ntohl(tcp_hdr->ack_seq);
-            printf("\r网口:%d   本地端口:%d   \033[32m 游戏已启动 \033[0m                                           \n", interface_num, ntohs(local_port));
+            printf("\r网口:%d   本地端口:%d     \033[32m 已连接到服务器 \033[0m                                           \n", interface_num, ntohs(local_port));
         }
     } else { //已找到俄钓起始数据包
         // 匹配接受的俄钓数据包
         if (tcp_hdr->dport != local_port) return; // 端口不对
+        if (fin_flag) {
+            init_sniffer(); 
+            return;
+        }
         if (data_length == 0) {return;}
 
         u_int seq = ntohl(tcp_hdr->seq);
-        if (seq < expect_seq) return;  // 重传包不要
-        if (seq > expect_seq) { // 未来包
+        if (seq < expect_seq && expect_seq - seq < (u_int)0x7F7F7F7F) return;  // 重传包不要
+        if (seq > expect_seq && seq - expect_seq < (u_int)0x7F7F7F7F) { // 未来包
             fprintf(log_ptr, "!!!!收到未来包 seq:%u expect:%u\n", seq, expect_seq);
             list_insert(future_packets, seq, data_length, raw_data);
             return;
@@ -181,21 +320,10 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
         while (node = list_search(future_packets, expect_seq)) { // 检查未来包列表
             expect_seq = node->seq + node->size;
             parse_single_packet(node->buffer, node->size);
-
             list_delete(future_packets, node);
         }
     }
 
-    // static int log_line_count = 0;
-
-    // time_t t;
-    // struct tm *tm_info;
-    // time(&t);
-    // tm_info = localtime(&t);
-    // SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), font_color_list[log_line_count % 4]);
-    // log_line_count++;
-    // printf("No.%d  %02d:%02d:%02d  Packet:%4d  ", log_line_count, tm_info->tm_hour, tm_info->tm_min, tm_info->tm_sec,data_length);
-    // printf("\n");
 }
 
 int main(int argc, char **argv) {
@@ -207,11 +335,6 @@ int main(int argc, char **argv) {
     wavList[2] = load_wav_file("./resource/3.wav");
 
     setlocale(LC_ALL, "en_US.UTF-8");
-    SetConsoleTitleW(L"妙妙小工具");
-
-    for (int i = 0; i < 256; i++) {
-        rc4.s_box[i] = i;
-    }
 
     // Initialize winsock
     WSADATA wsaData;
@@ -244,7 +367,6 @@ int main(int argc, char **argv) {
     char interface_name[256] = {0};
     printf("选择网口号: ");
     scanf("%s", &interface_name);
-    system("cls");
 	i = 0;
     // Check if the user provided an interface number or name
     if (interface_name[0] >= '0' && interface_name[0] <= '9') {
@@ -277,12 +399,6 @@ int main(int argc, char **argv) {
         }
     }
     
-
-    future_packets = list_create();
-    log_ptr = fopen(logname, "w");
-
-    printf("网口:%d.%s   \033[31m 等待游戏开启(小退重开)... \033[0m", interface_num, d->description);
-
     // Open the device
     handle = pcap_open_live(d->name, 65536, 1, 1000, errbuf);
     if (handle == NULL) {
@@ -291,8 +407,12 @@ int main(int argc, char **argv) {
         return -1;
     }
     // We don't need the device list anymore
-    pcap_freealldevs(alldevs);
+    // pcap_freealldevs(alldevs);
     
+    init_fish_table();
+
+    init_sniffer();
+
     // Start capturing packets
     pcap_loop(handle, 0, packet_handler, NULL);
     

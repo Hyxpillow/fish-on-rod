@@ -116,19 +116,20 @@ int list_size(List* list) {
 
 // Print the list for debugging
 // Free all memory used by the list
-// void list_destroy(List* list) {
-//     if (list == NULL) {
-//         return;
-//     }
+void list_destroy(List* list) {
+    if (list == NULL) {
+        return;
+    }
 
-//     Node* current = list->head;
-//     Node* next;
+    Node* current = list->head;
+    Node* next;
 
-//     while (current != NULL) {
-//         next = current->next;
-//         free(current);
-//         current = next;
-//     }
+    while (current != NULL) {
+        next = current->next;
+        free(current->buffer);
+        free(current);
+        current = next;
+    }
 
-//     free(list);
-// }
+    free(list);
+}
