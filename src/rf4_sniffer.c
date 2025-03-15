@@ -158,21 +158,30 @@ void parse_rod_packet() {
         rod1_hash1 = *(u_int64*)(dec_buffer + 0x10);
         rod1_hash2 = *(u_int64*)(dec_buffer + 0x18);
         op = 1;
+        if (rod1_hash1 != 0)
+            printf("%02d:%02d:%02d  设置1号竿\n",tm_info->tm_hour,tm_info->tm_min, tm_info->tm_sec, op);
+        else
+            printf("%02d:%02d:%02d  移除1号竿\n",tm_info->tm_hour,tm_info->tm_min, tm_info->tm_sec, op);
     } else if (shortcut == 0x020000) {
         rod2_hash1 = *(u_int64*)(dec_buffer + 0x10);
         rod2_hash2 = *(u_int64*)(dec_buffer + 0x18);
         op = 2;
+        if (rod2_hash1 != 0)
+            printf("%02d:%02d:%02d  设置2号竿\n",tm_info->tm_hour,tm_info->tm_min, tm_info->tm_sec, op);
+        else
+            printf("%02d:%02d:%02d  移除2号竿\n",tm_info->tm_hour,tm_info->tm_min, tm_info->tm_sec, op);
     } else if (shortcut == 0x030000) {
         rod3_hash1 = *(u_int64*)(dec_buffer + 0x10);
         rod3_hash2 = *(u_int64*)(dec_buffer + 0x18);
         op = 3;
+        if (rod3_hash1 != 0)
+            printf("%02d:%02d:%02d  设置3号竿\n",tm_info->tm_hour,tm_info->tm_min, tm_info->tm_sec, op);
+        else
+            printf("%02d:%02d:%02d  移除3号竿\n",tm_info->tm_hour,tm_info->tm_min, tm_info->tm_sec, op);
     } else {
         return;
     }
-    if (rod1_hash1 != 0)
-        printf("%02d:%02d:%02d  设置%u号鱼竿\n",tm_info->tm_hour,tm_info->tm_min, tm_info->tm_sec, op);
-    else
-        printf("%02d:%02d:%02d  移除%u号鱼竿\n",tm_info->tm_hour,tm_info->tm_min, tm_info->tm_sec, op);
+    
 }
 
 void parse_fish_packet() {
@@ -180,12 +189,16 @@ void parse_fish_packet() {
     u_int64 rod_hash2 = *(u_int64*)(dec_buffer + 0x1B);
 
     int rod = 0;
+    int rod_color = 0x0F;
     if (rod_hash1 == rod1_hash1 && rod_hash2 == rod1_hash2) {
         rod = 1;
+        rod_color = 0x0C;
     } else if (rod_hash1 == rod2_hash1 && rod_hash2 == rod2_hash2) {
         rod = 2;
+        rod_color = 0x0B;
     } else if (rod_hash1 == rod3_hash1 && rod_hash2 == rod3_hash2) {
         rod = 3;
+        rod_color = 0x0E;
     }
 
     u_char fish_name_len = dec_buffer[0x38];
@@ -198,27 +211,30 @@ void parse_fish_packet() {
     struct Fish_Data *fish_data = get_fish_data(fishname);
 
     const char* to_be_print_fish_name = "未知";
-    int to_be_print_color = 15;
+    int back_color = 0x00;
+    int font_color = 0x0F;
     if (fish_data) {
         to_be_print_fish_name = fish_data->name;
-        if (fish_data->rarity == 1) to_be_print_color = 5;
-        if (fish_data->rarity == 2) to_be_print_color = 13;
-        if ((double)fish_weight * 1000 >= (double)fish_data->trophy) to_be_print_color = 14;
-        if ((double)fish_weight * 1000 >= (double)fish_data->super_trophy) to_be_print_color = 9;
+        // if (fish_data->rarity == 1) font_color = 5;
+        // if (fish_data->rarity == 2) font_color = 13;
+        if ((double)fish_weight * 1000 >= (double)fish_data->trophy) {back_color = 0xE0; font_color = 0x00;}
+        if ((double)fish_weight * 1000 >= (double)fish_data->super_trophy) back_color = 0x90;
     }
-    
+
 
     time_t t;
     struct tm *tm_info;
     time(&t);
     tm_info = localtime(&t);
-
-    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), to_be_print_color);
-    printf("%02d:%02d:%02d    [Rod %d]    %.3f kg    %s\n",
+    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), back_color | font_color);
+    printf("%02d:%02d:%02d    ",
         tm_info->tm_hour,
         tm_info->tm_min,
-        tm_info->tm_sec,
-        rod, // 突出鱼竿号
+        tm_info->tm_sec);
+    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), back_color | rod_color);
+    printf("[%d号竿]", rod);
+    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), back_color | font_color);
+    printf("    %.3f kg    %s\n", 
         fish_weight,
         to_be_print_fish_name);
     SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 15);
