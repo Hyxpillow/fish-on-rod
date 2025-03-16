@@ -12,14 +12,16 @@
 #include "rf4_sniffer.h"
 #include "rf4_fish_name.h"
 #include "rf4_packet_list.h"
+#include "rf4_rod_type.h"
 
 
 char* wavList[3] = {0};
 int interface_num;
 pcap_if_t *alldevs, *d;
-char logname[64] = "./log/fullLog";
-wchar_t* status_normal = L"解密正常";
-wchar_t* status_obnormal = L"解密失败";
+char logname[64] = "./log/error.log";
+wchar_t* status_normal = L"正常";
+wchar_t* status_obnormal = L"失败";
+
 
 int rf4_token_captured = 0;
 u_int local_port;
@@ -31,12 +33,6 @@ int to_be_print_count;
 u_int expect_seq;
 List* future_packets;
 int fish_count;
-u_int64 rod1_hash1;
-u_int64 rod1_hash2;
-u_int64 rod2_hash1;
-u_int64 rod2_hash2;
-u_int64 rod3_hash1;
-u_int64 rod3_hash2;
 
 FILE *file_ptr = NULL;
 FILE *log_ptr = NULL;
@@ -59,12 +55,6 @@ void init_sniffer() {
     to_be_print_count = 0;
     expect_seq = 0;
     fish_count = 0;
-    rod1_hash1 = 0;
-    rod1_hash2 = 0;
-    rod2_hash1 = 0;
-    rod2_hash2 = 0;
-    rod3_hash1 = 0;
-    rod3_hash2 = 0;
 
     status_current = status_normal;
     for (int i = 0; i < 256; i++) {
@@ -83,6 +73,7 @@ void init_sniffer() {
     SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 15);
     printf("网口:%d.%s   \033[31m 等待连接至服务器(小退重连)... \033[0m", interface_num, d->description);
 }
+
 
 char* load_wav_file(const char* filename) {
     size_t size = 0;
@@ -138,9 +129,11 @@ u_char _PRGA() {
     return rc4.s_box[tmp_idx];
 }
 
-void save_packet(int size) {
+void save_packet(int size, u_int opcode) {
     char filename[64];
-    snprintf(filename, sizeof(filename), "./log/%u_%d", expect_seq  - size, size);
+    snprintf(filename, sizeof(filename), "./log/%08x", opcode);
+    CreateDirectoryA(filename, NULL);
+    snprintf(filename, sizeof(filename), "./log/%08x/%u_%d.log", opcode, expect_seq  - size, size);
     file_ptr = fopen(filename, "wb+");
     fwrite(dec_buffer, sizeof(u_char), dec_buffer_offset, file_ptr);
     fclose(file_ptr);
@@ -153,51 +146,37 @@ void parse_rod_packet() {
     struct tm *tm_info;
     time(&t);
     tm_info = localtime(&t);
-    u_int op = 0;
+
+    int rod_shortcut = 0;
     if (shortcut == 0x010000) {
-        rod1_hash1 = *(u_int64*)(dec_buffer + 0x10);
-        rod1_hash2 = *(u_int64*)(dec_buffer + 0x18);
-        op = 1;
-        if (rod1_hash1 != 0)
-            printf("%02d:%02d:%02d  设置1号竿\n",tm_info->tm_hour,tm_info->tm_min, tm_info->tm_sec, op);
-        else
-            printf("%02d:%02d:%02d  移除1号竿\n",tm_info->tm_hour,tm_info->tm_min, tm_info->tm_sec, op);
+        rod_shortcut = 1;
     } else if (shortcut == 0x020000) {
-        rod2_hash1 = *(u_int64*)(dec_buffer + 0x10);
-        rod2_hash2 = *(u_int64*)(dec_buffer + 0x18);
-        op = 2;
-        if (rod2_hash1 != 0)
-            printf("%02d:%02d:%02d  设置2号竿\n",tm_info->tm_hour,tm_info->tm_min, tm_info->tm_sec, op);
-        else
-            printf("%02d:%02d:%02d  移除2号竿\n",tm_info->tm_hour,tm_info->tm_min, tm_info->tm_sec, op);
+        rod_shortcut = 2;
     } else if (shortcut == 0x030000) {
-        rod3_hash1 = *(u_int64*)(dec_buffer + 0x10);
-        rod3_hash2 = *(u_int64*)(dec_buffer + 0x18);
-        op = 3;
-        if (rod3_hash1 != 0)
-            printf("%02d:%02d:%02d  设置3号竿\n",tm_info->tm_hour,tm_info->tm_min, tm_info->tm_sec, op);
-        else
-            printf("%02d:%02d:%02d  移除3号竿\n",tm_info->tm_hour,tm_info->tm_min, tm_info->tm_sec, op);
+        rod_shortcut = 3;
     } else {
         return;
     }
-    
+
+    u_int rod_hash1 = *(u_int*)(dec_buffer + 0x10);
+    if (rod_hash1 != 0) {
+        printf("%02d:%02d:%02d  设置%d号竿 [%08X]\n",tm_info->tm_hour,tm_info->tm_min, tm_info->tm_sec, rod_shortcut, rod_hash1);
+        set_rod_shortcut(rod_hash1, rod_shortcut);
+    } else {
+        printf("%02d:%02d:%02d  移除%d号竿\n",tm_info->tm_hour,tm_info->tm_min, tm_info->tm_sec, rod_shortcut);
+    }
 }
 
 void parse_fish_packet() {
-    u_int64 rod_hash1 = *(u_int64*)(dec_buffer + 0x13);
-    u_int64 rod_hash2 = *(u_int64*)(dec_buffer + 0x1B);
+    u_int rod_hash1 = *(u_int*)(dec_buffer + 0x13);
 
-    int rod = 0;
+    int rod = get_rod_shortcut(rod_hash1);
     int rod_color = 0x0F;
-    if (rod_hash1 == rod1_hash1 && rod_hash2 == rod1_hash2) {
-        rod = 1;
+    if (rod == 1) {
         rod_color = 0x0C;
-    } else if (rod_hash1 == rod2_hash1 && rod_hash2 == rod2_hash2) {
-        rod = 2;
+    } else if (rod == 2) {
         rod_color = 0x0B;
-    } else if (rod_hash1 == rod3_hash1 && rod_hash2 == rod3_hash2) {
-        rod = 3;
+    } else if (rod == 3) {
         rod_color = 0x0E;
     }
 
@@ -215,13 +194,10 @@ void parse_fish_packet() {
     int font_color = 0x0F;
     if (fish_data) {
         to_be_print_fish_name = fish_data->name;
-        // if (fish_data->rarity == 1) font_color = 5;
-        // if (fish_data->rarity == 2) font_color = 13;
         if ((double)fish_weight * 1000 >= (double)fish_data->trophy) {back_color = 0xE0; font_color = 0x00;}
         if ((double)fish_weight * 1000 >= (double)fish_data->super_trophy) back_color = 0x90;
     }
-
-
+    
     time_t t;
     struct tm *tm_info;
     time(&t);
@@ -231,6 +207,15 @@ void parse_fish_packet() {
         tm_info->tm_hour,
         tm_info->tm_min,
         tm_info->tm_sec);
+
+    if (get_rod_type(rod_hash1) != 3) { // 如果不是底部钓组 就响
+        PlaySound(wavList[rand() % 3], NULL, SND_MEMORY | SND_ASYNC | SND_NOSTOP);
+    } else {
+        rod_color = font_color; //如果是底部钓组，不显示钓竿颜色
+        printf("等待咬钩    ");
+    }
+    
+
     SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), back_color | rod_color);
     printf("[%d号竿]", rod);
     SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), back_color | font_color);
@@ -240,15 +225,100 @@ void parse_fish_packet() {
     SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 15);
 }
 
+void parse_fish_on_rod_packet() {
+    u_int rod_hash1 = *(u_int*)(dec_buffer + 0x2B);
+
+    if (get_rod_type(rod_hash1) == 3) { // 如果是底部钓组 响并打印
+        PlaySound(wavList[rand() % 3], NULL, SND_MEMORY | SND_ASYNC | SND_NOSTOP);
+    } else {
+        return; // 如果是其他钓组，
+    }
+
+    int rod = get_rod_shortcut(rod_hash1);
+    int rod_color = 0x0F;
+    if (rod == 1) {
+        rod_color = 0x0C;
+    } else if (rod == 2) {
+        rod_color = 0x0B;
+    } else if (rod == 3) {
+        rod_color = 0x0E;
+    }
+
+    
+
+    time_t t;
+    struct tm *tm_info;
+    time(&t);
+    tm_info = localtime(&t);
+    printf("%02d:%02d:%02d    ",
+        tm_info->tm_hour,
+        tm_info->tm_min,
+        tm_info->tm_sec);
+    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), rod_color);
+    printf("[%d号竿] 鱼咬钩了\n", rod);
+    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 15);
+}
+
+void parse_rod_into_water_packet() {
+    u_int rod_hash1;
+    u_int oprand = *(u_int*)(dec_buffer + 0x14);
+    if (oprand == 0x00950100) {
+        rod_hash1 = *(u_int*)(dec_buffer + 0x218);
+    } else if (oprand == 0x009D0100) {
+        rod_hash1 = *(u_int*)(dec_buffer + 0x30);
+    } else {
+       return; 
+    }  
+    // 如果竿子hash没见过
+    
+    int rod_type = get_rod_type(rod_hash1);
+    if (rod_type != 0) return;
+
+    for (int i = 0; i < dec_buffer_offset - 1; i++) {
+        if (dec_buffer[i] == 0) dec_buffer[i] = 1;
+    }
+    dec_buffer[dec_buffer_offset - 1] = 0;
+
+    if (strstr(dec_buffer, "Float")) {
+        rod_type = 1;
+    } else if (strstr(dec_buffer, "Lure")) {
+        rod_type = 2;
+    } else if (strstr(dec_buffer, "Bottom")) {
+        rod_type = 3;
+    } else if (strstr(dec_buffer, "Marine")) {
+        rod_type = 4;
+    }
+    set_rod_type(rod_hash1, rod_type);
+    time_t t;
+    struct tm *tm_info;
+    time(&t);
+    tm_info = localtime(&t);
+    printf("%02d:%02d:%02d  ",
+        tm_info->tm_hour,
+        tm_info->tm_min,
+        tm_info->tm_sec);
+    if (rod_type == 1) {
+        printf("鱼竿[%08X]类型为[浮子]\n", rod_hash1);
+    } else if (rod_type == 2) {
+        printf("鱼竿[%08X]类型为[路亚]\n", rod_hash1);
+    } else if (rod_type == 3) {
+        printf("鱼竿[%08X]类型为[水底]\n", rod_hash1);
+    } else if (rod_type == 4) {
+        printf("鱼竿[%08X]类型为[海钓]\n", rod_hash1);
+    } else {
+        printf("鱼竿[%08X]类型为[未知钓法]\n", rod_hash1);
+    }
+}
+
 void parse_single_packet(u_char* buffer, u_int size) {
     packet_count += 1;
     if (packet_count == 1) return;
     swprintf(title, 256, L"状态:%s 总计:%d", status_current, packet_count & 0xFFFF);
     SetConsoleTitleW(title);
     int offset = 0;
-    if (size > 13) {
-        fprintf(log_ptr, "seq:%u len:%u\n", expect_seq - size, size);
-    }
+    // if (size > 13) {
+    //     fprintf(log_ptr, "seq:%u len:%u\n", expect_seq - size, size);
+    // }
     while(offset < size) {
         if (to_be_decrypt_count > 0) {
             u_char decrypted_byte = buffer[offset] ^ _PRGA();
@@ -260,21 +330,41 @@ void parse_single_packet(u_char* buffer, u_int size) {
             offset++;
             
             if (to_be_decrypt_count == 0) {
-                fprintf(log_ptr, "    >> decrypt data:%x size:%d\n", *(u_int*)dec_buffer, dec_buffer_offset);
-                status_current =  (*(u_short*)(dec_buffer + 2)) == (u_short)0xFFFF? status_normal : status_obnormal;
-                if (*(u_int*)(dec_buffer + 8) == 0x030E0E00) { //上鱼    
-                    parse_fish_packet(); 
-                    PlaySound(wavList[rand() % 3], NULL, SND_MEMORY | SND_ASYNC | SND_NOSTOP);
-                } else if (*(u_int*)(dec_buffer + 8) == 0x00880100) { //杆子快捷键
-                    parse_rod_packet(); 
+                fprintf(log_ptr, "seq:%u len:%u\n", expect_seq - size, size);
+                // fprintf(log_ptr, "    >> decrypt data:%x size:%d\n", *(u_int*)dec_buffer, dec_buffer_offset);
+                if ((*(u_short*)(dec_buffer + 2)) == (u_short)0xFFFF) {
+                    status_current = status_normal;
+                } else {
+                    status_current = status_obnormal;
+                    // 打印log
                 }
-                // save_packet(size);
+                u_int opcode = *(u_int*)(dec_buffer + 8);
+                save_packet(size, opcode);
+                if (opcode == 0x030E0E00) { //刷新鱼    
+                    parse_fish_packet(); 
+                } else if (opcode == 0x00880100) { //快捷键
+                    parse_rod_packet(); 
+                } else if (opcode == 0x03160400) {  
+                    u_int oprand1 = *(u_int*)(dec_buffer + 12);
+                    u_int oprand2 = *(u_int*)(dec_buffer + 16);
+                    if (oprand1 == 0x01323602 && oprand2 == 0x00830100) { //鱼咬钩
+                        parse_fish_on_rod_packet();
+                    } else { // 手抛窝子
+
+                    }
+                } else if (opcode == 0x03200100) { // 切换棒子 装配件 打窝杆入水
+                    u_int oprand = *(u_int*)(dec_buffer + 0x14);
+                    if (oprand == 0x00950100 || oprand == 0x009D0100) { //杆子入水
+                        parse_rod_into_water_packet(); 
+                    }
+                }
+                fprintf(log_ptr, "seq:%u len:%u\n", expect_seq - size, size);
             }
         } else {
             to_be_decrypt_count = *(u_int*)(buffer + offset) - 9;
             offset += 13;
             if (to_be_decrypt_count > 0) {
-                fprintf(log_ptr, "  >> malloc size:%d\n", to_be_decrypt_count);
+                // fprintf(log_ptr, "  >> malloc size:%d\n", to_be_decrypt_count);
                 dec_buffer_offset = 0;
             }
         }
@@ -325,7 +415,7 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
         u_int seq = ntohl(tcp_hdr->seq);
         if (seq < expect_seq && expect_seq - seq < (u_int)0x7F7F7F7F) return;  // 重传包不要
         if (seq > expect_seq && seq - expect_seq < (u_int)0x7F7F7F7F) { // 未来包
-            fprintf(log_ptr, "!!!!收到未来包 seq:%u expect:%u\n", seq, expect_seq);
+            // fprintf(log_ptr, "!!!!收到未来包 seq:%u expect:%u\n", seq, expect_seq);
             list_insert(future_packets, seq, data_length, raw_data);
             return;
         }
@@ -349,6 +439,7 @@ int main(int argc, char **argv) {
     wavList[0] = load_wav_file("./resource/1.wav");
     wavList[1] = load_wav_file("./resource/2.wav");
     wavList[2] = load_wav_file("./resource/3.wav");
+
 
     setlocale(LC_ALL, "en_US.UTF-8");
 
