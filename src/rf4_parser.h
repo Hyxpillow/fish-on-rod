@@ -8,7 +8,6 @@
 
 static char* wavList[3];
 static u_int64 valid_data_count;
-static std::unordered_map<u_int, std::pair<u_int, u_int>> rod_table;
 
 void rf4_parser_init();
 void rf4_parser(u_char* buffer, u_int size);

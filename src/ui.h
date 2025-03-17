@@ -1,24 +1,27 @@
 #pragma once
+#include <winsock2.h>
 #include <windows.h>
 #include <iostream>
+#include <unordered_map>
 
 #define MAX_RODS 3
 #define MAX_TEXT_LENGTH 256
 
 // 定义渔具结构体
 typedef struct {
-    int hotkey;
-    int rodCode;
-    wchar_t rodType[MAX_TEXT_LENGTH];
-    wchar_t fishName[MAX_TEXT_LENGTH];
-    float fishWeight;
+    unsigned int short_cut;
+    unsigned int rod_hash;
+    float fish_weight;
+    std::string fish_name;
+    unsigned int rod_type;
     COLORREF bgColor;
 } FishingRod;
+
 
 // 全局变量
 extern HWND hwndMain;
 extern HFONT hFont;
-extern FishingRod rods[MAX_RODS];
+extern std::unordered_map<u_int, FishingRod> rod_table;
 
 
 // 函数声明

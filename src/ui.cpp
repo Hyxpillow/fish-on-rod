@@ -2,7 +2,7 @@
 
 HWND hwndMain;
 HFONT hFont;
-FishingRod rods[MAX_RODS];
+std::unordered_map<u_int, FishingRod> rod_table;
 // 主函数
 void startWinUI() {
     HINSTANCE hInstance = GetModuleHandle(NULL);
@@ -30,9 +30,6 @@ void startWinUI() {
                       DEFAULT_CHARSET, OUT_OUTLINE_PRECIS,
                       CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 
                       DEFAULT_PITCH | FF_DONTCARE, L"微软雅黑");  // 移除了L前缀
-    
-    // 初始化渔具数据
-    InitFishingRods();
     
     // 显示窗口
     ShowWindow(hwndMain, nCmdShow);
@@ -69,6 +66,17 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             // 绘制每行信息
             int rowHeight = clientRect.bottom / MAX_RODS;
             
+            FishingRod displaying_rods[3] = {0};
+            for (auto it = rod_table.begin(); it != rod_table.end(); i++) {
+                if (it->second.short_cut == 1) {
+                    displaying_rods[0] = it->second;
+                } else if (it->second.short_cut == 2) {
+                    displaying_rods[1] = it->second;
+                } else if (it->second.short_cut == 3) {
+                    displaying_rods[2] = it->second;
+                } 
+            }
+            
             for (int i = 0; i < MAX_RODS; i++) {
                 RECT rowRect = {0, i * rowHeight, clientRect.right, (i + 1) * rowHeight};
                 
@@ -83,11 +91,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 
                 wchar_t textBuffer[MAX_TEXT_LENGTH];
                 swprintf(textBuffer, MAX_TEXT_LENGTH,
-                    L"快捷键: %d | 鱼竿码: %d | 鱼竿类型: %s | 鱼名: %s | 重量: %.2f kg",
-                    rods[i].hotkey, rods[i].rodCode, 
-                    rods[i].rodType,
-                    rods[i].fishName,
-                    rods[i].fishWeight);
+                    L"快捷键: %d | 鱼竿码: %08X | 鱼竿类型: %d",
+                    displaying_rods[i].short_cut, 
+                    displaying_rods[i].rod_hash, 
+                    displaying_rods[i].rod_type);
                 
                 DrawTextW(hdc, textBuffer, -1, &rowRect, DT_SINGLELINE | DT_VCENTER | DT_LEFT);
             }
@@ -107,46 +114,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
 
-// 初始化渔具数据
-void InitFishingRods() {
-    // 初始化三个渔具示例数据
-    UpdateRodInfo(0, 3, 1001, L"碳素竿", L"鲤鱼", 2.5f, RGB(0, 120, 215));
-    UpdateRodInfo(1, 1, 1002, L"海竿", L"鲈鱼", 1.8f, RGB(0, 150, 100));
-    UpdateRodInfo(2, 2, 1003, L"溪流竿", L"鳟鱼", 3.2f, RGB(120, 0, 150));
-    
-    // 按快捷键排序
-    SortRodsByHotkey();
-}
-
-// 更新渔具信息
-void UpdateRodInfo(int index, int hotkey, int rodCode, const wchar_t* rodType, const wchar_t* fishName, float fishWeight, COLORREF bgColor) {
-    if (index >= 0 && index < MAX_RODS) {
-        rods[index].hotkey = hotkey;
-        rods[index].rodCode = rodCode;
-        wcscpy(rods[index].rodType, rodType);
-        wcscpy(rods[index].fishName, fishName);
-        rods[index].fishWeight = fishWeight;
-        rods[index].bgColor = bgColor;
-    }
-}
-
-// 按快捷键排序
-void SortRodsByHotkey() {
-    for (int i = 0; i < MAX_RODS - 1; i++) {
-        for (int j = 0; j < MAX_RODS - i - 1; j++) {
-            if (rods[j].hotkey > rods[j + 1].hotkey) {
-                FishingRod temp = rods[j];
-                rods[j] = rods[j + 1];
-                rods[j + 1] = temp;
-            }
-        }
-    }
-}
-
 // 更新UI函数 - 可从其他线程或定时器调用
 void UpdateUI() {
-    // 排序
-    SortRodsByHotkey();
     // 强制重绘窗口
     InvalidateRect(hwndMain, NULL, TRUE);
 }
