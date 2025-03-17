@@ -1,10 +1,10 @@
-#define MAX_PACKET_FILTER_COUNT 256
-#define MAX_DESCRIPTION_LENGTH 512
-#define PROTO_TCP 6
-#define FISHES_TXT "./data/fishes.txt"
-#define INVALID_PACKET_TXT "./data/invalid_packet.txt"
+#include <pcap.h>
+#include <winsock2.h>
+#include <vector>
+#include <unordered_map>
+#include "rc4.h"
+#include "rf4_parser.h"
 
-// Ethernet header
 typedef struct {
     u_char dest_mac[6];
     u_char src_mac[6];
@@ -43,9 +43,17 @@ typedef struct {
     u_short urg_ptr;        // Urgent pointer
 } tcp_header;
 
-// Structure to store fish information
-typedef struct {
-    char description[MAX_DESCRIPTION_LENGTH];
-    int number;
-} Packet_filter;
+static bool rf4_in_process;
+static u_int local_port;
+static u_int expect_seq;
+static u_int64 packet_count;
+static std::unordered_map<u_int, std::vector<u_char>> future_packet_table;
+static u_char dec_buffer[33554432];
+static int dec_buffer_offset;
+static int to_be_decrypt_count;
+static int to_be_print_count;
 
+void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u_char *packet);
+void parse_single_packet(u_char* buffer, u_int size);
+
+void init_sniffer();
