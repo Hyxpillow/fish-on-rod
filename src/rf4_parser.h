@@ -15,10 +15,6 @@ void parse_rod_packet(u_char* buffer, u_int size);
 void parse_fish_packet(u_char* buffer, u_int size);
 void parse_fish_on_rod_packet(u_char* buffer, u_int size);
 void parse_rod_into_water_packet(u_char* buffer, u_int size);
-
-void set_rod_type(u_int rod_hash, u_int rod_type);
-void set_rod_shortcut(u_int rod_hash, u_int rod_shortcut);
-u_int get_rod_type(u_int rod_hash);
-u_int get_rod_shortcut(u_int rod_hash);
+void parse_rod_back_packet(u_char* buffer, u_int size);
 
 char* load_wav_file(const char* filename);

@@ -2,7 +2,7 @@
 #include <string>
 
 struct Fish_Data {
-    std::string name;
+    const char* name;
     int trophy;
     int super_trophy;
     int rarity;

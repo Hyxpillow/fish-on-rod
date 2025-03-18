@@ -8,11 +8,14 @@
 #include "ui.h"
 
 void StartPcapLoop(pcap_t* handle) {
+    while (!initialed) {}
+    init_sniffer();
     pcap_loop(handle, 0, packet_handler, NULL);
 }
 
 int main() {
     // 选择网口
+    setlocale(LC_ALL, "en_US.UTF-8");
     char errbuf[PCAP_ERRBUF_SIZE];
     pcap_if_t *alldevs, *dev;
     std::vector<pcap_if_t*> devices;
@@ -39,32 +42,31 @@ int main() {
     }
     
     // 用户选择接口
-    int choice;
     std::cout << "选择网口号 (1-" << i << "): ";
-    std::cin >> choice;
+    std::cin >> dev_choice;
     
     // 验证选择
-    if (choice < 1 || choice > i) {
+    if (dev_choice < 1 || dev_choice > i) {
         std::cerr << "无效选择\n";
         pcap_freealldevs(alldevs);
         return 1;
     }
-    
+    snprintf(dev_description, 252, "%s", devices[dev_choice-1]->description);
     // 打开选择的设备
-    pcap_t *handle = pcap_open_live(devices[choice-1]->name, 65536, 1, 1000, errbuf);
+    pcap_t *handle = pcap_open_live(devices[dev_choice-1]->name, 65536, 1, 1000, errbuf);
     if (handle == NULL) {
         std::cerr << "无法打开设备: " << errbuf << std::endl;
         pcap_freealldevs(alldevs);
         return 1;
     }
+    pcap_freealldevs(alldevs);
 
     std::thread t1(StartPcapLoop, handle);
-    std::thread t2(startWinUI);
-    t1.join();
-    t2.join();
-    // 线程1: 监听网口
-    // 线程2: 显示UI
+    t1.detach();
 
+    startWinUI();
+    
+    pcap_breakloop(handle);
     pcap_close(handle);
     return 0;
 }

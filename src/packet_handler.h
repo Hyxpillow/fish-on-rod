@@ -1,9 +1,11 @@
+#pragma once
 #include <pcap.h>
 #include <winsock2.h>
 #include <vector>
 #include <unordered_map>
 #include "rc4.h"
 #include "rf4_parser.h"
+#include "ui.h"
 
 typedef struct {
     u_char dest_mac[6];
@@ -52,6 +54,8 @@ static u_char dec_buffer[33554432];
 static int dec_buffer_offset;
 static int to_be_decrypt_count;
 static int to_be_print_count;
+extern int dev_choice;
+extern char dev_description[256];
 
 void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u_char *packet);
 void parse_single_packet(u_char* buffer, u_int size);

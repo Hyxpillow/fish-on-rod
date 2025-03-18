@@ -1,5 +1,8 @@
 #include "packet_handler.h"
 
+int dev_choice;
+char dev_description[256];
+
 void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u_char *packet) {
     ethernet_header *eth_header = (ethernet_header *)packet;
     ethernet_header_lo *eth_header_lo = (ethernet_header_lo *)packet;
@@ -27,7 +30,6 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
             KSA(raw_data + 6, *(u_int*)(raw_data + 2));// S盒初始置换
             local_port = tcp_hdr->sport;
             expect_seq = ntohl(tcp_hdr->ack_seq);
-            // printf("\r网口:%d   本地端口:%d     \033[32m 已连接到服务器 \033[0m                                           \n", interface_num, ntohs(local_port));
         }
     } else { //已找到俄钓起始数据包
         // 匹配接受的俄钓数据包
@@ -56,8 +58,6 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
 void parse_single_packet(u_char* buffer, u_int size) {
     packet_count += 1;
     if (packet_count == 1) return;
-    // swprintf(title, 256, L"状态:%s 总计:%d", status_current, packet_count & 0xFFFF);
-    // SetConsoleTitleW(title);
     int offset = 0;
     while(offset < size) {
         if (to_be_decrypt_count > 0) {
@@ -93,4 +93,12 @@ void init_sniffer() {
     to_be_print_count = 0;
     RC4_reset();
     rf4_parser_init();
+    
+    WCHAR cellText[512];
+    swprintf(cellText, 512, L"等待连接至服务器... (网口:%d.%s)", dev_choice, dev_description);
+    UpdateStatus(cellText);
+
+    SetCellColor(0, 0);
+    SetCellColor(1, 0);
+    SetCellColor(2, 0);
 }

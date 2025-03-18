@@ -30,8 +30,8 @@ unsigned char PRGA() {
 
 void RC4_reset() {
     for (int idx = 0; idx < 256; idx++) {
-        s_box[i] = i;
-        i = 0;
-        j = 0;
+        s_box[idx] = idx;
     }
+    i = 0;
+    j = 0;
 }

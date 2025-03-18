@@ -3,6 +3,8 @@
 #include <windows.h>
 #include <iostream>
 #include <unordered_map>
+#include <commctrl.h>
+#pragma comment(lib, "comctl32.lib")
 
 #define MAX_RODS 3
 #define MAX_TEXT_LENGTH 256
@@ -10,24 +12,24 @@
 // 定义渔具结构体
 typedef struct {
     unsigned int short_cut;
-    unsigned int rod_hash;
     float fish_weight;
-    std::string fish_name;
-    unsigned int rod_type;
-    COLORREF bgColor;
+    const char* fish_name;
+    WCHAR state[256]; // 0:就绪 1:入水 2:刷鱼 3:鱼上钩
+    unsigned int rod_type; // 1:浮子 2:路亚 3:水底 4:海钓
 } FishingRod;
 
 
 // 全局变量
 extern HWND hwndMain;
 extern HFONT hFont;
+extern int initialed;
 extern std::unordered_map<u_int, FishingRod> rod_table;
 
 
 // 函数声明
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 void startWinUI();
-void InitFishingRods();
-void SortRodsByHotkey();
 void UpdateUI();
-void UpdateRodInfo(int index, int hotkey, int rodCode, const wchar_t* rodType, const wchar_t* fishName, float fishWeight, COLORREF bgColor);
+void UpdateStatus(WCHAR *str);
+
+void SetCellColor(int row, int color);

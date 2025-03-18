@@ -8,14 +8,41 @@ void rf4_parser_init() {
         wavList[2] = load_wav_file("./resource/3.wav");
     }
     valid_data_count = 0;
+    rod_table.clear();
+    UpdateUI();
+
+}
+void save_packet(u_char* buffer, int size, u_int opcode) {
+    char filename[256];
+    snprintf(filename, sizeof(filename), "./log/%08X", opcode);
+    CreateDirectoryA(filename, NULL);
+    snprintf(filename, sizeof(filename), "./log/%08X/%lld_%d.log",opcode, valid_data_count, size);
+    FILE* file_ptr = fopen(filename, "wb+");
+    fwrite(buffer, sizeof(u_char), size, file_ptr);
+    fclose(file_ptr);
+    file_ptr = NULL;
+}
+
+bool contains_value(const u_char* buffer, u_int size, u_int value) {
+    for (u_int i = 0; i <= size - sizeof(u_int); ++i) {
+        if (memcmp(buffer + i, &value, sizeof(u_int)) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void rf4_parser(u_char* buffer, u_int size) {
+    WCHAR cellText[256];
+    valid_data_count++;
     if ((*(u_short*)(buffer + 2)) == (u_short)0xFFFF) {
-        valid_data_count++;
+        swprintf(cellText, 256, L"已连接到服务器(状态:解密正常 总计:%d)", valid_data_count & 0xFFFF);
+    } else {
+        swprintf(cellText, 256, L"解密失败");
     }
+    UpdateStatus(cellText);
+
     u_int opcode = *(u_int*)(buffer + 8);
-    // save_packet(size, opcode);
     if (opcode == 0x030E0E00) { //刷新鱼    
         parse_fish_packet(buffer, size); 
     } else if (opcode == 0x00880100) { //快捷键
@@ -34,7 +61,7 @@ void rf4_parser(u_char* buffer, u_int size) {
             parse_rod_into_water_packet(buffer, size); 
         }
     } else if (opcode == 0x03210100) { // 收杆
-
+        parse_rod_back_packet(buffer, size);
     }
 }
 
@@ -58,8 +85,12 @@ void parse_rod_packet(u_char* buffer, u_int size) {
                 it->second.short_cut = 0;
             }
         }
-    } else { //设置竿子快捷键
-        set_rod_shortcut(rod_hash1, rod_shortcut);
+    } else { //设置竿子快捷键，如果竿子没见过，设置初始状态
+        if (auto it = rod_table.find(rod_hash1); it == rod_table.end()) {
+            // init rod_table[rod_hash1]
+            swprintf(rod_table[rod_hash1].state, 256, L"就绪");
+        }
+        rod_table[rod_hash1].short_cut = rod_shortcut;
     }
     UpdateUI();
 }
@@ -78,12 +109,16 @@ void parse_fish_packet(u_char* buffer, u_int size) {
         const Fish_Data& fish = fish_table[fishname];
         rod_table[rod_hash1].fish_name = fish.name; // CN
     } else {
-        rod_table[rod_hash1].fish_name = fishname; // EN
+        rod_table[rod_hash1].fish_name = "未知"; // EN
     }
     rod_table[rod_hash1].fish_weight = fish_weight;
+    swprintf(rod_table[rod_hash1].state, 256, L"等待咬钩 (%s, %.3fkg)", rod_table[rod_hash1].fish_name, fish_weight);
 
-    if (get_rod_type(rod_hash1) != 3) { // 如果不是底部钓组 就响
+    int rod_type = rod_table[rod_hash1].rod_type;
+    int rod_short_cut = rod_table[rod_hash1].short_cut;
+    if (rod_type != 3 && rod_short_cut != 0) { // 如果不是底部钓组 就响
         // Set BackColor
+        SetCellColor(rod_short_cut - 1, 1);
         PlaySound(wavList[rand() % 3], NULL, SND_MEMORY | SND_ASYNC | SND_NOSTOP);
     }
     UpdateUI();
@@ -91,10 +126,14 @@ void parse_fish_packet(u_char* buffer, u_int size) {
 
 void parse_fish_on_rod_packet(u_char* buffer, u_int size) {
     u_int rod_hash1 = *(u_int*)(buffer + 0x2B);
-    if (get_rod_type(rod_hash1) == 3) { // 如果是底部钓组 响并打印
+    swprintf(rod_table[rod_hash1].state, 256, L"咬钩了 (%s, %.3fkg)", rod_table[rod_hash1].fish_name, rod_table[rod_hash1].fish_weight);
+    int rod_type = rod_table[rod_hash1].rod_type;
+    int rod_short_cut = rod_table[rod_hash1].short_cut;
+    if (rod_type == 3 && rod_short_cut != 0) { // 如果不是底部钓组 就响
         // Set BackColor
+        SetCellColor(rod_short_cut - 1, 1);
         PlaySound(wavList[rand() % 3], NULL, SND_MEMORY | SND_ASYNC | SND_NOSTOP);
-    } 
+    }
     UpdateUI();
 }
 
@@ -108,25 +147,42 @@ void parse_rod_into_water_packet(u_char* buffer, u_int size) {
     } else {
        return; 
     }  
+    bool seen = rod_table.find(rod_hash1) != rod_table.end();
+    if (!seen) {
+        rod_table[rod_hash1].short_cut = 0;
+    }
+    if (rod_table[rod_hash1].rod_type == 0) {
+        for (int i = 0; i < size - 1; i++) {
+            if (buffer[i] == 0) buffer[i] = 1;
+        }
+        buffer[size - 1] = 0;
+        if (strstr((const char*)buffer, "Float")) {
+            rod_table[rod_hash1].rod_type = 1;
+        } else if (strstr((const char*)buffer, "Lure")) {
+            rod_table[rod_hash1].rod_type = 2;
+        } else if (strstr((const char*)buffer, "Bottom")) {
+            rod_table[rod_hash1].rod_type = 3;
+        } else if (strstr((const char*)buffer, "Marine")) {
+            rod_table[rod_hash1].rod_type = 4;
+        }
+    }
+    swprintf(rod_table[rod_hash1].state, 256, L"在水中");
     
-    int rod_type = get_rod_type(rod_hash1);
-    if (rod_type != 0) return; // 竿子记录过了
-
-    for (int i = 0; i < size - 1; i++) {
-        if (buffer[i] == 0) buffer[i] = 1;
-    }
-    buffer[size - 1] = 0;
-    if (strstr((const char*)buffer, "Float")) {
-        rod_type = 1;
-    } else if (strstr((const char*)buffer, "Lure")) {
-        rod_type = 2;
-    } else if (strstr((const char*)buffer, "Bottom")) {
-        rod_type = 3;
-    } else if (strstr((const char*)buffer, "Marine")) {
-        rod_type = 4;
-    }
-    set_rod_type(rod_hash1, rod_type);
     UpdateUI();
+}
+
+void parse_rod_back_packet(u_char* buffer, u_int size) {
+    for (auto it = rod_table.begin(); it != rod_table.end(); ++it) {
+        if (contains_value(buffer, size, it->first)) {
+            int rod_short_cut = it->second.short_cut;
+            if (rod_short_cut != 0) {
+                SetCellColor(rod_short_cut - 1, 0);
+            }
+            swprintf(it->second.state, 256, L"就绪");
+            UpdateUI();
+            break;
+        }
+    }
 }
 
 char* load_wav_file(const char* filename) {
@@ -153,36 +209,4 @@ char* load_wav_file(const char* filename) {
 
     fclose(file);
     return buffer;
-}
-
-void set_rod_type(u_int rod_hash, u_int rod_type) {
-    if(auto it = rod_table.find(rod_hash); it != rod_table.end()) {
-        it->second.rod_type = rod_type;
-    } else {
-        rod_table[rod_hash] = FishingRod();
-        rod_table[rod_hash].rod_type = rod_type;
-    }
-}
-
-void set_rod_shortcut(u_int rod_hash, u_int rod_shortcut) {
-    if(auto it = rod_table.find(rod_hash); it != rod_table.end()) {
-        it->second.short_cut = rod_shortcut;
-    } else {
-        rod_table[rod_hash] = FishingRod();
-        rod_table[rod_hash].short_cut = rod_shortcut;
-    }
-}
-
-u_int get_rod_type(u_int rod_hash) {
-    if(auto it = rod_table.find(rod_hash); it != rod_table.end()) {
-        return it->second.rod_type;
-    }
-    return 0;
-}
-
-u_int get_rod_shortcut(u_int rod_hash) {
-    if(auto it = rod_table.find(rod_hash); it != rod_table.end()) {
-        return it->second.short_cut;
-    }
-    return 0;
 }
