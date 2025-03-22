@@ -30,10 +30,14 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
             KSA(raw_data + 6, *(u_int*)(raw_data + 2));// S盒初始置换
             local_port = tcp_hdr->sport;
             expect_seq = ntohl(tcp_hdr->ack_seq);
+
+            // remote_port = tcp_hdr->dport;
+            // expect_seq = ntohl(tcp_hdr->seq) + data_length;
         }
     } else { //已找到俄钓起始数据包
         // 匹配接受的俄钓数据包
         if (tcp_hdr->dport != local_port) return; // 端口不对
+        // if (tcp_hdr->dport != remote_port) return; // 端口不对
         if (fin_flag) {init_sniffer(); return;}
         if (data_length == 0) {return;}
 
@@ -85,6 +89,7 @@ void parse_single_packet(u_char* buffer, u_int size) {
 void init_sniffer() {
     rf4_in_process = 0;
     local_port = 0;
+    remote_port = 0;
     expect_seq = 0;
     packet_count = 0;
     future_packet_table.clear();
@@ -98,7 +103,7 @@ void init_sniffer() {
     swprintf(cellText, 512, L"等待连接至服务器... (网口:%d.%s)", dev_choice, dev_description);
     UpdateStatus(cellText);
 
-    SetCellColor(0, 0);
-    SetCellColor(1, 0);
-    SetCellColor(2, 0);
+    UpdateColor(0, 0);
+    UpdateColor(1, 0);
+    UpdateColor(2, 0);
 }

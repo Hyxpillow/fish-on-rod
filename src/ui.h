@@ -14,8 +14,10 @@ typedef struct {
     unsigned int short_cut;
     float fish_weight;
     const char* fish_name;
-    WCHAR state[256]; // 0:就绪 1:入水 2:刷鱼 3:鱼上钩
+    
+    WCHAR state[256]; 
     unsigned int rod_type; // 1:浮子 2:路亚 3:水底 4:海钓
+    unsigned int color; // 0:白色 1:黄色
 } FishingRod;
 
 
@@ -29,7 +31,7 @@ extern std::unordered_map<u_int, FishingRod> rod_table;
 // 函数声明
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 void startWinUI();
-void UpdateUI();
+void UI_reset();
 void UpdateStatus(WCHAR *str);
-
-void SetCellColor(int row, int color);
+void UpdateText(int row, WCHAR str[]);
+void UpdateColor(int row, int color);

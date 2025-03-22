@@ -47,6 +47,7 @@ typedef struct {
 
 static bool rf4_in_process;
 static u_int local_port;
+static u_int remote_port;
 static u_int expect_seq;
 static u_int64 packet_count;
 static std::unordered_map<u_int, std::vector<u_char>> future_packet_table;
