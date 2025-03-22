@@ -9,14 +9,13 @@ void rf4_parser_init() {
     }
     valid_data_count = 0;
     rod_table.clear();
-    UpdateUI();
-
+    UI_reset();
 }
 void save_packet(u_char* buffer, int size, u_int opcode) {
     char filename[256];
-    snprintf(filename, sizeof(filename), "./log/%08X", opcode);
-    CreateDirectoryA(filename, NULL);
-    snprintf(filename, sizeof(filename), "./log/%08X/%lld_%d.log",opcode, valid_data_count, size);
+    // snprintf(filename, sizeof(filename), "./log/%08X", opcode);
+    // CreateDirectoryA(filename, NULL);
+    snprintf(filename, sizeof(filename), "./log/%lld_%08X_%d.log", valid_data_count, opcode, size);
     FILE* file_ptr = fopen(filename, "wb+");
     fwrite(buffer, sizeof(u_char), size, file_ptr);
     fclose(file_ptr);
@@ -41,8 +40,34 @@ void rf4_parser(u_char* buffer, u_int size) {
         swprintf(cellText, 256, L"解密失败");
     }
     UpdateStatus(cellText);
-
     u_int opcode = *(u_int*)(buffer + 8);
+    // if (opcode != 0x03131800 
+    //     && opcode != 0x03090300) // 消息
+    //     save_packet(buffer, size, opcode);
+        // 0x03 == *(u_char*)(buffer + 11) 
+
+        // 0x03090300 发送定时信息
+        // 03131800 发送 确认消息
+
+        // 03010E00 抛竿
+        // 03020E00 入水？
+        // 03030E00 
+        // 03040E00 收杆
+        // 03050E00 入户
+        // 03060E00 
+        // 03070E00 在水中 位置改变
+        // 03080E00 拉鱼
+        // 03090E00 
+        // 03010C00 打窝 
+
+    // 01920100 切换场景
+    // 03200100 吃东西
+    // 031b1800 收消息
+    // 37_3A9B0100_3528 开船
+    //685_009E0100_54 抛竿
+    // 03210100 手杆
+    // 03200100 鱼入户 切换棒子 装配件 打窝杆入水 竿子入水
+    // 03010200 快照
     if (opcode == 0x030E0E00) { //刷新鱼    
         parse_fish_packet(buffer, size); 
     } else if (opcode == 0x00880100) { //快捷键
@@ -55,7 +80,8 @@ void rf4_parser(u_char* buffer, u_int size) {
         } else { // 手抛窝子
     
         }
-    } else if (opcode == 0x03200100) { // 切换棒子 装配件 打窝杆入水
+       
+    } else if (opcode == 0x03200100) { // 
         u_int oprand = *(u_int*)(buffer + 0x14);
         if (oprand == 0x00950100 || oprand == 0x009D0100) { //杆子入水
             parse_rod_into_water_packet(buffer, size); 
@@ -69,30 +95,37 @@ void rf4_parser(u_char* buffer, u_int size) {
 void parse_rod_packet(u_char* buffer, u_int size) {
     u_int shortcut = *(u_int*)(buffer + 0x0C);
     u_int rod_hash1 = *(u_int*)(buffer + 0x10);
-    int rod_shortcut = 0;
+    int rod_short_cut = 0;
     if (shortcut == 0x010000) {
-        rod_shortcut = 1;
+        rod_short_cut = 1;
     } else if (shortcut == 0x020000) {
-        rod_shortcut = 2;
+        rod_short_cut = 2;
     } else if (shortcut == 0x030000) {
-        rod_shortcut = 3;
+        rod_short_cut = 3;
     } else {
         return;
     }
-    if (rod_hash1 == 0) { //移除竿子，需要找到table中hotkey==rod_shortcut的，并设置hotkey=0
+    if (rod_hash1 == 0) { //移除竿子，需要找到table中hotkey==rod_short_cut的，并设置hotkey=0
         for (auto it = rod_table.begin(); it != rod_table.end(); it++) {
-            if (it->second.short_cut == rod_shortcut) {
+            if (it->second.short_cut == rod_short_cut) {
                 it->second.short_cut = 0;
+                WCHAR tmp[10] = L"--";
+                UpdateText(rod_short_cut - 1, tmp);
+                UpdateColor(rod_short_cut - 1, 0);
             }
         }
     } else { //设置竿子快捷键，如果竿子没见过，设置初始状态
         if (auto it = rod_table.find(rod_hash1); it == rod_table.end()) {
-            // init rod_table[rod_hash1]
             swprintf(rod_table[rod_hash1].state, 256, L"就绪");
+            rod_table[rod_hash1].color = 0;
+            UpdateText(rod_short_cut - 1, rod_table[rod_hash1].state);
+            UpdateColor(rod_short_cut - 1, rod_table[rod_hash1].color);
+        } else { //如果见过了，就替换为
+            UpdateText(rod_short_cut - 1, it->second.state);
+            UpdateColor(rod_short_cut - 1, it->second.color);
         }
-        rod_table[rod_hash1].short_cut = rod_shortcut;
+        rod_table[rod_hash1].short_cut = rod_short_cut;
     }
-    UpdateUI();
 }
 
 void parse_fish_packet(u_char* buffer, u_int size) {
@@ -116,12 +149,15 @@ void parse_fish_packet(u_char* buffer, u_int size) {
 
     int rod_type = rod_table[rod_hash1].rod_type;
     int rod_short_cut = rod_table[rod_hash1].short_cut;
-    if (rod_type != 3 && rod_short_cut != 0) { // 如果不是底部钓组 就响
-        // Set BackColor
-        SetCellColor(rod_short_cut - 1, 1);
-        PlaySound(wavList[rand() % 3], NULL, SND_MEMORY | SND_ASYNC | SND_NOSTOP);
+    rod_table[rod_hash1].color = 1;
+
+    if (rod_short_cut != 0) {
+        if (rod_type != 3) { // 如果不是底部钓组 就响
+            UpdateColor(rod_short_cut - 1, 1);
+            PlaySound(wavList[rand() % 3], NULL, SND_MEMORY | SND_ASYNC | SND_NOSTOP);
+        }
+        UpdateText(rod_short_cut - 1, rod_table[rod_hash1].state);
     }
-    UpdateUI();
 }
 
 void parse_fish_on_rod_packet(u_char* buffer, u_int size) {
@@ -129,12 +165,15 @@ void parse_fish_on_rod_packet(u_char* buffer, u_int size) {
     swprintf(rod_table[rod_hash1].state, 256, L"咬钩了 (%s, %.3fkg)", rod_table[rod_hash1].fish_name, rod_table[rod_hash1].fish_weight);
     int rod_type = rod_table[rod_hash1].rod_type;
     int rod_short_cut = rod_table[rod_hash1].short_cut;
-    if (rod_type == 3 && rod_short_cut != 0) { // 如果不是底部钓组 就响
-        // Set BackColor
-        SetCellColor(rod_short_cut - 1, 1);
-        PlaySound(wavList[rand() % 3], NULL, SND_MEMORY | SND_ASYNC | SND_NOSTOP);
+    rod_table[rod_hash1].color = 1;
+
+    if (rod_short_cut != 0) {
+        if (rod_type == 3) { // 如果是底部钓组 就响
+            UpdateColor(rod_short_cut - 1, 1);
+            PlaySound(wavList[rand() % 3], NULL, SND_MEMORY | SND_ASYNC | SND_NOSTOP);
+        }
+        UpdateText(rod_short_cut - 1, rod_table[rod_hash1].state);
     }
-    UpdateUI();
 }
 
 void parse_rod_into_water_packet(u_char* buffer, u_int size) {
@@ -167,19 +206,25 @@ void parse_rod_into_water_packet(u_char* buffer, u_int size) {
         }
     }
     swprintf(rod_table[rod_hash1].state, 256, L"在水中");
-    
-    UpdateUI();
+    int rod_short_cut = rod_table[rod_hash1].short_cut;
+    rod_table[rod_hash1].color = 0;
+
+    if (rod_short_cut != 0) {
+        UpdateColor(rod_short_cut - 1, 0);
+        UpdateText(rod_short_cut - 1, rod_table[rod_hash1].state);
+    }
 }
 
 void parse_rod_back_packet(u_char* buffer, u_int size) {
     for (auto it = rod_table.begin(); it != rod_table.end(); ++it) {
         if (contains_value(buffer, size, it->first)) {
+            swprintf(it->second.state, 256, L"就绪");
+            it->second.color = 0;
             int rod_short_cut = it->second.short_cut;
             if (rod_short_cut != 0) {
-                SetCellColor(rod_short_cut - 1, 0);
+                UpdateColor(rod_short_cut - 1, 0);
+                UpdateText(rod_short_cut - 1, it->second.state);
             }
-            swprintf(it->second.state, 256, L"就绪");
-            UpdateUI();
             break;
         }
     }

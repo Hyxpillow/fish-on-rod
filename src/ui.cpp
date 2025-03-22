@@ -135,28 +135,23 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
     return DefWindowProcW(hwnd, uMsg, wParam, lParam);
 }
 
-// 更新UI函数 - 可从其他线程或定时器调用
-void UpdateUI() {
-    bool has_value[3] = {0};
-    for (auto it = rod_table.begin(); it != rod_table.end(); ++it) {
-        int sc = it->second.short_cut;
-        if (sc == 1 || sc == 2 || sc == 3) {
-            SetWindowTextW(hGrid[sc - 1][1], it->second.state);
-            has_value[sc - 1] = 1;
-        }
-    }
+void UI_reset() {
     for (int i = 0; i < 3; i++) {
-        if (!has_value[i]) {
-            SetWindowTextW(hGrid[i][1], L"[空]");
-        }
+        SetWindowTextW(hGrid[i][1], L"--");
+        UpdateColor(i, 0);
     }
 }
+
 
 void UpdateStatus(WCHAR *str) {
     SendMessageW(hStatusBar, SB_SETTEXTW, 0, (LPARAM)str);
 }
 
-void SetCellColor(int row, int color) {
+void UpdateText(int row, WCHAR str[]) {
+    SetWindowTextW(hGrid[row][1], str);
+}
+
+void UpdateColor(int row, int color) {
     HWND hwndCell1 = hGrid[row][0];
     HWND hwndCell2 = hGrid[row][1];
     if (color == 0) {
