@@ -1,14 +1,15 @@
 #include "ui.h"
 
-HWND hGrid[3][2]; // Grid of window controls
+HWND hGrid; // Grid of window controls
 HWND hStatusBar;
 HWND hwndMain;
 HFONT  hFont;
 int initialed;
 HBRUSH hb1;
 HBRUSH hb2;
-std::unordered_map<u_int, FishingRod> rod_table;
-std::unordered_map<HWND, HBRUSH> cellBackgrounds;
+HBRUSH current_hb;
+// std::unordered_map<u_int, FishingRod> rod_table;
+// std::unordered_map<HWND, HBRUSH> cellBackgrounds;
 
 // 主函数
 void startWinUI() {
@@ -18,7 +19,7 @@ void startWinUI() {
     WNDCLASSW  wc = {0};
     wc.lpfnWndProc = WindowProc;
     wc.hInstance = hInstance;
-    wc.lpszClassName = L"FishingRodUI";  // 移除了L前缀
+    wc.lpszClassName = L"Hyxpillow";  // 移除了L前缀
     wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     
@@ -26,9 +27,9 @@ void startWinUI() {
     
     // 创建主窗口
     hwndMain = CreateWindowW(
-        L"FishingRodUI", L"妙妙小工具", 
+        L"Hyxpillow", L"LoL School", 
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX ,
-        CW_USEDEFAULT, CW_USEDEFAULT, 600, 200,
+        CW_USEDEFAULT, CW_USEDEFAULT, 600, 150,
         NULL, NULL, hInstance, NULL
     );
     SetForegroundWindow(hwndMain);
@@ -65,48 +66,69 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             hStatusBar = CreateWindowExW(0, STATUSCLASSNAMEW, NULL,
                 WS_CHILD | WS_VISIBLE, 0, 0, 0, 0,
                 hwnd, (HMENU)100, ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+
+            // 设置状态栏分为三个部分，第一部分占50%，其余两部分各占25%
+            int parts[3];
+            RECT rcClient;
+            GetClientRect(hwnd, &rcClient);
+            parts[0] = rcClient.right * 7 / 10; // 第一部分占50%
+            parts[1] = rcClient.right * 8.5 / 10; // 第二部分结束位置（75%）
+            parts[2] = -1;  // 第三部分延伸到窗口右边缘
+            
+            // 应用分割
+            SendMessageW(hStatusBar, SB_SETPARTS, 3, (LPARAM)parts);
+            
+            // 设置初始文本
+            SendMessageW(hStatusBar, SB_SETTEXTW, 0, (LPARAM)L"--");
+            SendMessageW(hStatusBar, SB_SETTEXTW, 1, (LPARAM)L"--");
+            SendMessageW(hStatusBar, SB_SETTEXTW, 2, (LPARAM)L"--");
+            
             SendMessageW(hStatusBar, WM_SETFONT, (WPARAM)hFont, TRUE);
 
             hb2 = CreateSolidBrush(RGB(255, 167, 37));
             hb1 = CreateSolidBrush(RGB(255, 245, 228));
             
-            for (int row = 0; row < 3; row++) {
-                for (int col = 0; col < 2; col++) {
-                    hGrid[row][col] = CreateWindowExW(
-                        WS_EX_CLIENTEDGE, // Border style
-                        L"STATIC", // Using STATIC control for cells
-                        L"", // Initial text
-                        WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE,
-                        col == 0 ? 0 : 100, // X position (column 1 starts at 0, column 2 at 60)
-                        row * 50, // Y position (each row is 50px high)
-                        col == 0 ? 100 : 500, // Width (column 1 is 60px, column 2 is 540px)
-                        50, // Height (each cell is 50px high)
-                        hwnd,
-                        (HMENU)MAKEINTRESOURCE(200 + row * 2 + col), // Unique ID for each cell
-                        ((LPCREATESTRUCT)lParam)->hInstance,
-                        NULL
-                    );
+            hGrid = CreateWindowExW(
+                WS_EX_CLIENTEDGE, // Border style
+                L"STATIC", // Using STATIC control for cells
+                L"", // Initial text
+                WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE,
+                0,
+                0, // Y position (each row is 50px high)
+                600, // Width (column 1 is 60px, column 2 is 540px)
+                100, // Height (each cell is 50px high)
+                hwnd,
+                (HMENU)MAKEINTRESOURCE(200), // Unique ID for each cell
+                ((LPCREATESTRUCT)lParam)->hInstance,
+                NULL
+            );
 
-                    cellBackgrounds[hGrid[row][col]] = hb1;
-                    
-                    // Set initial text for each cell
-                    WCHAR cellText[100];
-                    if (col == 0)
-                        swprintf(cellText, 100, L"鱼竿%d", row + 1);
-                    else
-                        swprintf(cellText, 100, L"[空]");
-                    SetWindowTextW(hGrid[row][col], cellText);
-                    SendMessageW(hGrid[row][col], WM_SETFONT, (WPARAM)hFont, TRUE);
-                }
-            }
+            // cellBackgrounds[hGrid[0][col]] = hb1;
+            current_hb = hb1;
+            
+            // Set initial text for each cell
+            WCHAR cellText[100];
+            swprintf(cellText, 100, L"[空]");
+            SetWindowTextW(hGrid, cellText);
+            SendMessageW(hGrid, WM_SETFONT, (WPARAM)hFont, TRUE);
             initialed = 1;
             break;
         }
         case WM_SIZE: {
             RECT rcClient;
             GetClientRect(hwnd, &rcClient);
+            
+            // 重新计算状态栏分割
+            int parts[3];
+            parts[0] = rcClient.right * 7 / 10; // 第一部分占50%
+            parts[1] = rcClient.right * 8.5 / 10; // 第二部分结束位置（75%）
+            parts[2] = -1;  // 第三部分延伸到窗口右边缘
+            
             // 调整状态栏大小
             SendMessage(hStatusBar, WM_SIZE, 0, 0);
+            // 应用新的分割
+            SendMessageW(hStatusBar, SB_SETPARTS, 3, (LPARAM)parts);
+            
             // 获取状态栏高度
             RECT rcStatus;
             GetWindowRect(hStatusBar, &rcStatus);
@@ -120,9 +142,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             HDC hdcStatic = (HDC)wParam;
             HWND hwndStatic = (HWND)lParam;
 
-            if (cellBackgrounds.find(hwndStatic) != cellBackgrounds.end()) {
+            if (hwndStatic == hGrid) {
                 SetBkMode(hdcStatic, TRANSPARENT);
-                return (LRESULT)cellBackgrounds[hwndStatic]; // 返回对应的 HBRUSH
+                return (LRESULT)current_hb; // 返回对应的 HBRUSH
             }
             break;
         }
@@ -136,31 +158,30 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 }
 
 void UI_reset() {
-    for (int i = 0; i < 3; i++) {
-        SetWindowTextW(hGrid[i][1], L"--");
-        UpdateColor(i, 0);
-    }
+    SetWindowTextW(hGrid, L"--");
+    UpdateColor(0);
 }
 
+
+void UpdateStatus(const WCHAR *str, int part) {
+    if (part >= 0 && part <= 2) {
+        SendMessageW(hStatusBar, SB_SETTEXTW, part, (LPARAM)str);
+    }
+}
 
 void UpdateStatus(WCHAR *str) {
-    SendMessageW(hStatusBar, SB_SETTEXTW, 0, (LPARAM)str);
+    UpdateStatus(str, 0);
 }
 
-void UpdateText(int row, WCHAR str[]) {
-    SetWindowTextW(hGrid[row][1], str);
+void UpdateText(WCHAR str[]) {
+    SetWindowTextW(hGrid, str);
 }
 
-void UpdateColor(int row, int color) {
-    HWND hwndCell1 = hGrid[row][0];
-    HWND hwndCell2 = hGrid[row][1];
+void UpdateColor(int color) {
     if (color == 0) {
-        cellBackgrounds[hwndCell1] = hb1;
-        cellBackgrounds[hwndCell2] = hb1;
+        current_hb = hb1;
     } else if (color == 1) {
-        cellBackgrounds[hwndCell1] = hb2;
-        cellBackgrounds[hwndCell2] = hb2;
+        current_hb = hb2;
     }
-    InvalidateRect(hwndCell1, NULL, TRUE); // 触发重绘
-    InvalidateRect(hwndCell2, NULL, TRUE); // 触发重绘
+    InvalidateRect(hGrid, NULL, TRUE); // 触发重绘
 }

@@ -9,7 +9,9 @@
 
 void StartPcapLoop(pcap_t* handle) {
     while (!initialed) {}
-    init_sniffer();
+    UI_reset();
+    local_parser.init();
+    remote_parser.init();
     pcap_loop(handle, 0, packet_handler, NULL);
 }
 
