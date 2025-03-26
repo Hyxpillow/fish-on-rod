@@ -3,15 +3,18 @@
 #include <string>
 #include <vector>
 #include <thread>
+#include <fstream>
 
 #include "packet_handler.h"
 #include "ui.h"
+#include "wav_data.h"
 
 void StartPcapLoop(pcap_t* handle) {
     while (!initialed) {}
     UI_reset();
     local_parser.init();
     remote_parser.init();
+    wav = std::vector<char>(wavData, wavData + wavDataSize);
     pcap_loop(handle, 0, packet_handler, NULL);
 }
 

@@ -9,24 +9,27 @@
 #define MAX_RODS 3
 #define MAX_TEXT_LENGTH 256
 
-// 定义渔具结构体
-// typedef struct {
-//     unsigned int short_cut;
-//     float fish_weight;
-//     const char* fish_name;
+enum MenuIDs {
+    // 展示设置子菜单
+    ID_DISPLAY_SINGLE_ROD = 1000,
+    ID_DISPLAY_MULTI_ROD,
+
+    // 音效设置子菜单
+    ID_SOUND_FISH_HOOKED,
+    ID_SOUND_FISH_SPAWN,
+    ID_SOUND_MARINE,
+
+    // 海钓音效设置子菜单
+    ID_MARINE_BOTTOM_MOTION,
+    ID_MARINE_DISTANCE_MARKER,
     
-//     WCHAR state[256]; 
-//     unsigned int rod_type; // 1:浮子 2:路亚 3:水底 4:海钓
-//     unsigned int color; // 0:白色 1:黄色
-// } FishingRod;
+    // 其他菜单项
+    ID_PROMICRO_SEND,
+    ID_PROMICRO_AUTO,
+};
 
-
-// 全局变量
-extern HWND hwndMain;
-extern HFONT hFont;
 extern int initialed;
-// extern std::unordered_map<u_int, FishingRod> rod_table;
-
+extern float meter;
 
 // 函数声明
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
@@ -34,5 +37,13 @@ void startWinUI();
 void UI_reset();
 void UpdateStatus(WCHAR *str);
 void UpdateStatus(const WCHAR *str, int part);
-void UpdateText(WCHAR str[]);
-void UpdateColor(int color);
+
+void UpdateTextSingle(WCHAR str[]);
+void UpdateColorSingle(int color);
+void UpdateTextMulti(int idx, WCHAR str[]);
+void UpdateColorMulti(int idx, int color);
+
+bool isMenuChecked(int id);
+void ShowInputDialog(HINSTANCE hInstance, HWND parent);
+void UpdateMenuText(HWND hwnd, WCHAR newText[]);
+void AdjustLayout(HWND hwnd);

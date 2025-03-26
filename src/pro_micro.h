@@ -1,9 +1,9 @@
 #include <iostream>
 #include <windows.h>  // Windows API
+#include "ui.h"  // Windows API
 #include <string>
 
 // 设备名称和波特率
-const char* DEVICE_NAME = "\\\\.\\COM11";  // 替换为您的串口名称
 const int BAUD_RATE = 9600;
 
 // 全局串口句柄
@@ -51,7 +51,7 @@ bool initialize_serial(bool forceReconnect = false) {
     
     // 打开串口
     g_hSerial = CreateFileA(
-        DEVICE_NAME,
+        "\\\\.\\COM11",
         GENERIC_READ | GENERIC_WRITE,
         0,
         NULL,
@@ -101,6 +101,9 @@ bool initialize_serial(bool forceReconnect = false) {
 
 // 通用的信号发送函数
 void try_send(char signal) {
+    if (!isMenuChecked(ID_PROMICRO_SEND)) {
+        return;  // 如果硬件模式被禁用，直接返回
+    }
     // 尝试初始化串口，首先尝试现有连接
     if (!initialize_serial()) {
         // 如果连接失败，尝试强制重连一次
@@ -112,7 +115,7 @@ void try_send(char signal) {
     // 发送指定信号
     char szBuff[1] = {signal};
     DWORD dwBytesWritten = 0;
-    
+    // std::cout << "Sending signal: " << signal << std::endl;
     // 尝试写入
     if (!WriteFile(g_hSerial, szBuff, 1, &dwBytesWritten, NULL)) {
         // 写入失败，可能是连接断开，下次发送时会尝试重连
