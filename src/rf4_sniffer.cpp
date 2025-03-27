@@ -11,10 +11,11 @@
 
 void StartPcapLoop(pcap_t* handle) {
     while (!initialed) {}
-    UI_reset();
+    LoadFishImages(L"fishes");
     local_parser.init();
     remote_parser.init();
     wav = std::vector<char>(wavData, wavData + wavDataSize);
+    // UpdateTextSingle(L"好");
     pcap_loop(handle, 0, packet_handler, NULL);
 }
 

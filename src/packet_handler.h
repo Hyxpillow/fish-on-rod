@@ -53,8 +53,13 @@ void packet_handler(u_char *user_data, const struct pcap_pkthdr *pkthdr, const u
 
 
 std::vector<char> wav;
-bool drop_that_fish = 0;
 u_int hotKey[3];
+
+static const char* fishname_single;
+static float fish_weight_single;
+const char* fishname_multi[3];
+float fish_weight_multi[3];
+
 static int total_data_count;
 extern int dev_choice;
 extern char dev_description[256];
@@ -79,11 +84,7 @@ protected:
     std::normal_distribution<double> distribution;
     WCHAR cellText[256];
 
-    const char* fishname_single;
-    float fish_weight_single;
-
-    const char* fishname_multi[3];
-    float fish_weight_multi[3];
+    bool sent = false;
 
 public:
     virtual bool sub_filter(tcp_header *tcp_hdr, int data_length, u_char* raw_data) = 0;
@@ -153,7 +154,7 @@ public:
     }
     
     void init() {
-        swprintf(cellText, 256, L"等待连接至服务器... (网口:%d.%s)", dev_choice, dev_description);
+        swprintf(cellText, 256, L"等待连接 (网口:%d.%s)", dev_choice, dev_description);
         UpdateStatus(cellText, 0);
         swprintf(cellText, 256, L"--");
         UpdateStatus(cellText, 2);
@@ -169,10 +170,62 @@ public:
         parser_state = 1;
         buffer_offset = 0;
         rc4.reset();
+        sent = false;
         gen = std::mt19937(std::time(0));
         UI_reset();
         for (int i = 0; i < 3; i++) {
             hotKey[i] = 0;
+        }
+        // setPng(0,"karasekarp", 500, 2);
+    }
+
+    void setText(u_int rod_hash, WCHAR str[]) {
+        UpdateTextSingle(str);
+        for (int i = 0; i < 3; i++) {
+            if (hotKey[i] == rod_hash) {
+                UpdateTextMulti(i, str);
+            }
+        }
+    }
+
+    void setColor(u_int rod_hash, int color) {
+        UpdateColorSingle(color);
+        for (int i = 0; i < 3; i++) {
+            if (hotKey[i] == rod_hash) {
+                UpdateColorMulti(i, color);
+            }
+        }
+    }
+    void setPng(u_int rod_hash, const char* fish_name, float fish_weight, u_char fish_tv) {
+        Gdiplus::Image *trof = nullptr;
+        if (fish_weight >= fish_table[fish_name].super_trophy) {
+            trof = trophy_img2;
+        } else if (fish_weight >= fish_table[fish_name].trophy) {
+            trof = trophy_img1;
+        } else if (fish_tv != 0x01) {
+            trof = trophy_img3;
+        }
+        UpdatePngSingle(fish_table[fish_name].image);
+        UpdateRaritySingle(fish_table[fish_name].rarity_img);
+        UpdateTrophySingle(trof);
+        for (int i = 0; i < 3; i++) {
+            if (hotKey[i] == rod_hash) {
+                UpdatePngMulti(i, fish_table[fish_name].image);
+                UpdateRarityMulti(i, fish_table[fish_name].rarity_img);
+                UpdateTrophyMulti(i, trof);
+            }
+        }
+    }
+    void hidePng(u_int rod_hash) {
+        UpdatePngSingle(nullptr);
+        UpdateRaritySingle(nullptr);
+        UpdateTrophySingle(nullptr);
+        for (int i = 0; i < 3; i++) {
+            if (hotKey[i] == rod_hash) {
+                UpdatePngMulti(i, nullptr);
+                UpdateRarityMulti(i, nullptr);
+                UpdateTrophyMulti(i, nullptr);
+            }
         }
     }
     
@@ -190,7 +243,6 @@ private:
         fclose(file_ptr);
         file_ptr = NULL;
     }
-    bool sent = false;
 public:   
     bool sub_filter(tcp_header *tcp_hdr, int data_length, u_char* raw_data) override {
         if (rf4_in_process) {  //正在处理俄钓数据包
@@ -220,57 +272,38 @@ public:
         if (opcode == 0x03010E00) {  // 抛竿
             u_int rod_hash = *(u_int*)(buffer + 0x13);
             swprintf(cellText, 256, L"抛竿");
-            UpdateTextSingle(cellText);
-            for (int i = 0; i < 3; i++) if (hotKey[i] == rod_hash) UpdateTextMulti(i, cellText);
+            setText(rod_hash, cellText);
             sent = false;
         } else if (opcode == 0x03020E00) { // 入水
             u_int rod_hash = *(u_int*)(buffer + 0x13);
-            swprintf(cellText, 256, L"入水");
-            UpdateTextSingle(cellText);
-            for (int i = 0; i < 3; i++) if (hotKey[i] == rod_hash) UpdateTextMulti(i, cellText);
+            swprintf(cellText, 256, L"在水中");
+            setText(rod_hash, cellText);
+            sent = false;
         } else if (opcode == 0x03070E00) { // 在水中
             // float loc_x = *(float*)(buffer + 0x28);
             // float loc_y = *(float*)(buffer + 0x2c);
             // float loc_z = *(float*)(buffer + 0x30);
             if (sent) return;
+            u_int rod_hash = *(u_int*)(buffer + 0x13);
             u_char loc_len = *(buffer + 0x34);
             u_char rod_state = *(buffer + 0x34 + loc_len + 7);
             float rod_out_line_length = *(float*)(buffer + 0x34 + loc_len + 21);
 
-            if ((rod_state & 0x20) != 0 && isMenuChecked(ID_MARINE_BOTTOM_MOTION)) { // 沉底
+            if (((rod_state & 0x20) != 0 && isMenuChecked(ID_MARINE_BOTTOM_MOTION))
+                || (rod_out_line_length > meter && isMenuChecked(ID_MARINE_DISTANCE_MARKER))) { // 沉底
                 if (isMenuChecked(ID_SOUND_MARINE)) Beep(700, 500);
-                try_send('2');
-                sent = true;
-            } else if (rod_out_line_length > meter && isMenuChecked(ID_MARINE_DISTANCE_MARKER)) { // 卡米轻抽
-                if (isMenuChecked(ID_SOUND_MARINE)) Beep(700, 500);
+                if (isMenuChecked(ID_COLOR_MARINE)) setColor(rod_hash, 2);
                 try_send('2');
                 sent = true;
             }
         } else if (opcode == 0x03040E00) { // 收杆
-            u_int rod_hash = *(u_int*)(buffer + 0x13);
-            swprintf(cellText, 256, L"收杆");
-            UpdateTextSingle(cellText);
-            UpdateColorSingle(0);
-            for (int i = 0; i < 3; i++) 
-                if (hotKey[i] == rod_hash) {
-                    UpdateTextMulti(i, cellText);
-                    UpdateColorMulti(i, 0);
-                }
-
-            if (!isMenuChecked(ID_PROMICRO_AUTO)) {
-                try_send('1');
-            } else if (drop_that_fish) {
-                try_send('7'); // 丢弃
-            } else {
-                try_send('6'); // 入户
-            }
-            sent = false;
         } else if (opcode == 0x03050E00) { // 入户
         } else if (opcode == 0x030B0E00) { // 咬钩
+            u_int rod_hash = *(u_int*)(buffer + 0x13);
+            if (isMenuChecked(ID_SOUND_FISH_HOOKED)) PlaySound(wav.data(), NULL, SND_MEMORY | SND_ASYNC | SND_NOSTOP);
+            if (isMenuChecked(ID_COLOR_FISH_HOOKED)) setColor(rod_hash, 1);
             try_send('3');
-            if (isMenuChecked(ID_SOUND_FISH_HOOKED)) {
-                PlaySound(wav.data(), NULL, SND_MEMORY | SND_ASYNC | SND_NOSTOP);
-            }
+            sent = false;
         } else if (opcode == 0x03080E00) { // 拉鱼
             float rod_out_line_length = *(float*)(buffer + 0x74);
             if (rod_out_line_length < 8) {
@@ -278,16 +311,17 @@ public:
             }
         } else if (opcode == 0x030C0E00) { // 滑口
             u_int rod_hash = *(u_int*)(buffer + 0x13);
-            swprintf(cellText, 256, L"滑口了 (%s, %.3fkg)", fishname_single, fish_weight_single);
+            swprintf(cellText, 256, L"滑口了 (%s %.3fkg)", fishname_single, fish_weight_single);
             UpdateTextSingle(cellText);
             UpdateColorSingle(0);
             for (int i = 0; i < 3; i++) 
                 if (hotKey[i] == rod_hash) {
-                    swprintf(cellText, 256, L"滑口了 (%s, %.3fkg)", fishname_multi[i], fish_weight_multi[i]);
+                    swprintf(cellText, 256, L"滑口了 (%s %.3fkg)", fishname_multi[i], fish_weight_multi[i]);
                     UpdateTextMulti(i, cellText);
                     UpdateColorMulti(i, 0);
                 }
             try_send('4');
+            sent = false;
         }
     }
 
@@ -337,7 +371,7 @@ public:
             memcpy(fishname, buffer + 0x39, fish_name_len);
             fishname[fish_name_len] = 0;
             
-            u_char fish_quality = *(buffer + 57 + fish_name_len);
+            u_char fish_tv = *(buffer + 57 + fish_name_len);
             float fish_weight = *(float*)(buffer + 62 + fish_name_len);
             
             const char* fishname_cn = "未知";
@@ -345,28 +379,19 @@ public:
                 const Fish_Data& fish = fish_table[fishname];
                 fishname_cn = fish.name; // CN
             }
-            if (fish_quality == 1) {
-                drop_that_fish = true;
-                swprintf(cellText, 256, L"小卡拉米 (%s, %.3fkg)", fishname_cn, fish_weight);
-            } else {
-                drop_that_fish = false;
-                swprintf(cellText, 256, L"电视鱼 (%s, %.3fkg)", fishname_cn, fish_weight);
-            }
+            swprintf(cellText, 256, L"%s %.3fkg", fishname_cn, fish_weight);
+
             fish_weight_single = fish_weight;
             fishname_single = fishname_cn;
-            UpdateTextSingle(cellText);
-            UpdateColorSingle(1);
             for (int i = 0; i < 3; i++) 
                 if (hotKey[i] == rod_hash) {
                     fish_weight_multi[i] = fish_weight;
                     fishname_multi[i] = fishname_cn;
-                    UpdateTextMulti(i, cellText);
-                    UpdateColorMulti(i, 1);
                 }
-
-            if (isMenuChecked(ID_SOUND_FISH_SPAWN)) {
-                PlaySound(wav.data(), NULL, SND_MEMORY | SND_ASYNC | SND_NOSTOP);
-            }
+            setText(rod_hash, cellText);
+            setPng(rod_hash, fishname, fish_weight, fish_tv);
+            if (isMenuChecked(ID_SOUND_FISH_SPAWN)) PlaySound(wav.data(), NULL, SND_MEMORY | SND_ASYNC | SND_NOSTOP);
+            if (isMenuChecked(ID_COLOR_FISH_SPAWN)) setColor(rod_hash, 1);
         } else if (opcode == 0x00880100) {
             u_char shortcut = *(buffer + 0x0E);
             u_int rod_hash1 = *(u_int*)(buffer + 0x10);
@@ -384,6 +409,22 @@ public:
                 UpdateTextMulti(rod_short_cut - 1, cellText);
                 UpdateColorMulti(rod_short_cut - 1, 0);
             }
+        } else if (opcode == 0x03210100) {
+            u_char fish_quality = *(buffer + 0x1A +  *(buffer + 0x19) + 35);
+            u_int rod_hash = *(u_int*)(buffer + *(buffer + 0x19) + 340);
+            swprintf(cellText, 256, L"收杆 %s", fish_quality? "达标" : "不达标");
+            setText(rod_hash, cellText);
+            setColor(rod_hash, 0);
+            hidePng(rod_hash);
+
+            if (!isMenuChecked(ID_PROMICRO_AUTO)) {
+                try_send('1');
+            } else if (!fish_quality) {
+                try_send('7'); // 丢弃
+            } else {
+                try_send('6'); // 入户
+            }
+            sent = false;
         }
     }
 };

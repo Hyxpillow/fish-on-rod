@@ -21,8 +21,8 @@ unsigned long keyPressTime = 0;
 int current_state = 0;
 
 // 状态3的随机间隔范围（毫秒）
-const int MIN_STATE3_INTERVAL = 2325;  // 最小间隔
-const int MAX_STATE3_INTERVAL = 3725;  // 最大间隔
+const int MIN_STATE3_INTERVAL = 2525;  // 最小间隔
+const int MAX_STATE3_INTERVAL = 4725;  // 最大间隔
 
 // 状态3的随机长按持续时间范围（毫秒）
 const int MIN_STATE3_PRESS_DURATION = 400;   // 最小持续时间
@@ -43,6 +43,7 @@ void setup() {
   updateState3RandomParams();
   // 等待串口稳定
   delay(2000);
+  Keyboard.releaseAll();
 }
 
 // 更新状态3的随机参数
@@ -98,7 +99,9 @@ void loop() {
     }
     break;
   case SIGNAL_3:
-    delay(random(500, 1000));
+    delay(random(200, 600));
+    releaseAll();
+    delay(random(20, 100));
     Keyboard.press('.');
     isKeyPressed_1 = true;
     delay(random(20, 100));
